@@ -1,0 +1,104 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Laundry {
+  id            String   @id
+  name          String
+  email         String?
+  city          String
+  state         String
+  street        String
+  neighborhood  String
+  googleMapsURL String?
+  organizationId String
+  ownerName     String
+  ownerEmail    String
+  ownerMobile   String
+  createdAt     DateTime
+  syncedAt      DateTime @default(now())
+
+  sales     Sale[]
+  cycles    Cycle[]
+  customers CustomerLaundry[]
+}
+
+model Sale {
+  id                String    @id
+  laundryId         String
+  customerId        String
+  customerName      String
+  customerDoc       String
+  customerEmail     String?
+  customerMobile    String?
+  customerBirthDate DateTime?
+  documentType      String
+  paidValue         Float
+  totalValue        Float
+  paymentMethod     String
+  machineType       String
+  machines          Int[]
+  serviceType       String
+  date              DateTime
+  syncedAt          DateTime  @default(now())
+
+  laundry  Laundry  @relation(fields: [laundryId], references: [id])
+  customer Customer @relation(fields: [customerId], references: [id])
+}
+
+model Cycle {
+  id             String   @id @default(cuid())
+  laundryId      String
+  customerId     String
+  machineType    String
+  machinesUsed   Int[]
+  machinesCount  Int
+  totalPaidValue Float
+  totalValue     Float
+  salesCount     Int
+  paymentMethod  String
+  cycleDate      DateTime
+  syncedAt       DateTime @default(now())
+
+  laundry  Laundry  @relation(fields: [laundryId], references: [id])
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@unique([laundryId, customerId, machineType, cycleDate])
+}
+
+model Customer {
+  id           String    @id
+  name         String
+  email        String?
+  mobile       String?
+  document     String
+  documentType String
+  birthDate    DateTime?
+  syncedAt     DateTime  @default(now())
+
+  sales     Sale[]
+  cycles    Cycle[]
+  laundries CustomerLaundry[]
+}
+
+model CustomerLaundry {
+  customerId String
+  laundryId  String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  laundry    Laundry  @relation(fields: [laundryId], references: [id])
+
+  @@id([customerId, laundryId])
+}
+
+model SyncLog {
+  id        Int      @id @default(autoincrement())
+  entity    String
+  status    String
+  message   String?
+  createdAt DateTime @default(now())
+}

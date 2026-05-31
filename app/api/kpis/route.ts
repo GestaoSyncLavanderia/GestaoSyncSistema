@@ -1,0 +1,105 @@
+import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import {
+  startOfDay,
+  startOfMonth,
+  startOfYear,
+  subDays,
+  subMonths,
+  subYears,
+  endOfDay,
+  getDate,
+} from "date-fns";
+
+function pct(current: number, previous: number): number | null {
+  if (previous === 0) return null;
+  return Math.round(((current - previous) / previous) * 100);
+}
+
+export async function GET() {
+  const now = new Date();
+  const todayStart = startOfDay(now);
+  const todayEnd = endOfDay(now);
+  const yesterdayStart = startOfDay(subDays(now, 1));
+  const yesterdayEnd = endOfDay(subDays(now, 1));
+  const monthStart = startOfMonth(now);
+  const prevMonthStart = startOfMonth(subMonths(now, 1));
+  const prevMonthEnd = endOfDay(subDays(monthStart, 1));
+  const yearStart = startOfYear(now);
+  const prevYearStart = startOfYear(subYears(now, 1));
+  const prevYearEnd = endOfDay(subDays(yearStart, 1));
+  const daysElapsed = getDate(now);
+
+  const [
+    fatHoje, fatOntem,
+    ciclosHoje, ciclosOntem,
+    ticketHoje, ticketOntem,
+    fatMes, fatMesAnterior,
+    fatAno, fatAnoAnterior,
+    rankingHoje,
+  ] = await Promise.all([
+    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
+    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: yesterdayStart, lte: yesterdayEnd } } }),
+    db.cycle.count({ where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
+    db.cycle.count({ where: { cycleDate: { gte: yesterdayStart, lte: yesterdayEnd } } }),
+    db.cycle.aggregate({ _avg: { totalPaidValue: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
+    db.cycle.aggregate({ _avg: { totalPaidValue: true }, where: { cycleDate: { gte: yesterdayStart, lte: yesterdayEnd } } }),
+    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: monthStart } } }),
+    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: prevMonthStart, lte: prevMonthEnd } } }),
+    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: yearStart } } }),
+    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: prevYearStart, lte: prevYearEnd } } }),
+    db.cycle.groupBy({
+      by: ["laundryId"],
+      _sum: { totalPaidValue: true },
+      _count: { id: true },
+      where: { cycleDate: { gte: todayStart } },
+      orderBy: { _sum: { totalPaidValue: "desc" } },
+      take: 5,
+    }),
+  ]);
+
+  const laundryIds = rankingHoje.map((r) => r.laundryId);
+  const laundries =
+    laundryIds.length > 0
+      ? await db.laundry.findMany({
+          where: { id: { in: laundryIds } },
+          select: { id: true, name: true, city: true, state: true },
+        })
+      : [];
+
+  const laundryMap = Object.fromEntries(laundries.map((l) => [l.id, l]));
+  const distribution = rankingHoje.map((r) => ({
+    laundryId: r.laundryId,
+    name: laundryMap[r.laundryId]?.name ?? r.laundryId,
+    city: laundryMap[r.laundryId]?.city ?? "",
+    state: laundryMap[r.laundryId]?.state ?? "",
+    total: r._sum.totalPaidValue ?? 0,
+    cycles: r._count.id,
+  }));
+
+  const fatHojeVal   = fatHoje._sum.totalPaidValue ?? 0;
+  const fatOntemVal  = fatOntem._sum.totalPaidValue ?? 0;
+  const ticketVal    = ticketHoje._avg.totalPaidValue ?? 0;
+  const ticketAntVal = ticketOntem._avg.totalPaidValue ?? 0;
+  const fatMesVal    = fatMes._sum.totalPaidValue ?? 0;
+  const fatMesAntVal = fatMesAnterior._sum.totalPaidValue ?? 0;
+  const fatAnoVal    = fatAno._sum.totalPaidValue ?? 0;
+  const fatAnoAntVal = fatAnoAnterior._sum.totalPaidValue ?? 0;
+  const mediaDiaria  = daysElapsed > 0 ? fatMesVal / daysElapsed : 0;
+
+  // Média diária do mês anterior (mês cheio)
+  const diasMesAnt = new Date(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth() + 1, 0).getDate();
+  const mediaDiariaAnt = diasMesAnt > 0 ? fatMesAntVal / diasMesAnt : 0;
+
+  return NextResponse.json({
+    kpis: {
+      fatHoje:    { value: fatHojeVal,   trend: pct(fatHojeVal, fatOntemVal) },
+      ciclosHoje: { value: ciclosHoje,   trend: pct(ciclosHoje, ciclosOntem) },
+      ticketMedio:{ value: ticketVal,    trend: pct(ticketVal, ticketAntVal) },
+      fatMes:     { value: fatMesVal,    trend: pct(fatMesVal, fatMesAntVal) },
+      mediaDiaria:{ value: mediaDiaria,  trend: pct(mediaDiaria, mediaDiariaAnt) },
+      fatAno:     { value: fatAnoVal,    trend: pct(fatAnoVal, fatAnoAntVal) },
+    },
+    distribution,
+  });
+}
