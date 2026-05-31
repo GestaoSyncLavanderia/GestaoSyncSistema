@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { parsePeriod, getPeriodDates } from "@/lib/period";
 import { Search, Users, Info, X, UserCheck, UserX, Cake } from "lucide-react";
@@ -70,7 +70,7 @@ interface CustomersResponse {
   balanceUsers: BalanceUser[];
 }
 
-export default function CustomersPage() {
+function CustomersContent() {
   const searchParams = useSearchParams();
   const period = parsePeriod(searchParams.get("period"));
   const { from, to } = getPeriodDates(period);
@@ -414,5 +414,13 @@ export default function CustomersPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function CustomersPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500">Carregando...</div>}>
+      <CustomersContent />
+    </Suspense>
   );
 }

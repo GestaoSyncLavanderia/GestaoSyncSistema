@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { parsePeriod, getPeriodDates } from "@/lib/period";
 import { SCard } from "@/components/s-card";
@@ -24,7 +24,7 @@ interface LaundryWithStats {
   };
 }
 
-export default function LaundriesPage() {
+function LaundriesContent() {
   const searchParams = useSearchParams();
   const period = parsePeriod(searchParams.get("period"));
   const { from, to } = getPeriodDates(period);
@@ -88,5 +88,13 @@ export default function LaundriesPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function LaundriesPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500">Carregando...</div>}>
+      <LaundriesContent />
+    </Suspense>
   );
 }

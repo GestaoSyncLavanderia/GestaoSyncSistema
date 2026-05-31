@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { parsePeriod, getPeriodDates } from "@/lib/period";
 import {
@@ -82,7 +82,7 @@ function DistribCard({ title, items }: { title: string; items: DistribEntry[] })
   );
 }
 
-export default function SalesPage() {
+function SalesContent() {
   const searchParams = useSearchParams();
   const period = parsePeriod(searchParams.get("period"));
   const periodDates = getPeriodDates(period);
@@ -356,5 +356,13 @@ export default function SalesPage() {
         onPageChange={setPage}
       />
     </div>
+  );
+}
+
+export default function SalesPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500">Carregando...</div>}>
+      <SalesContent />
+    </Suspense>
   );
 }
