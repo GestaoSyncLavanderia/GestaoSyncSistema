@@ -184,7 +184,7 @@ export default function SalesPage() {
               <XAxis dataKey="date" tickFormatter={formatDateLabel} tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
               <YAxis tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={52} />
               <Tooltip
-                formatter={(value: number) => [formatCurrency(value), "Faturamento"]}
+                formatter={(value) => [formatCurrency(Number(value ?? 0)), "Faturamento"]}
                 labelFormatter={formatDateLabel}
                 contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
               />
@@ -251,9 +251,9 @@ export default function SalesPage() {
                   width={52}
                 />
                 <Tooltip
-                  formatter={(value: number, name: string) => [
-                    formatCurrency(value),
-                    name === "current" ? `Atual (${comparison.currentLabel})` : `Anterior (${comparison.previousLabel})`,
+                  formatter={(value, name) => [
+                    formatCurrency(Number(value ?? 0)),
+                    String(name) === "current" ? `Atual (${comparison.currentLabel})` : `Anterior (${comparison.previousLabel})`,
                   ]}
                   contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
                 />
@@ -300,9 +300,9 @@ export default function SalesPage() {
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false} axisLine={false} interval={2} />
                 <YAxis tickFormatter={(v) => `${v}`} tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={28} />
                 <Tooltip
-                  formatter={(value: number, name: string) => [
-                    name === "count" ? `${value} ciclos` : formatCurrency(value),
-                    name === "count" ? "Ciclos" : "Faturamento",
+                  formatter={(value, name) => [
+                    String(name) === "count" ? `${Number(value ?? 0)} ciclos` : formatCurrency(Number(value ?? 0)),
+                    String(name) === "count" ? "Ciclos" : "Faturamento",
                   ]}
                   contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
                 />
@@ -321,9 +321,9 @@ export default function SalesPage() {
                 <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} />
                 <YAxis tickFormatter={(v) => `${v}`} tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={28} />
                 <Tooltip
-                  formatter={(value: number, name: string) => [
-                    name === "count" ? `${value} ciclos` : formatCurrency(value),
-                    name === "count" ? "Ciclos" : "Faturamento",
+                  formatter={(value, name) => [
+                    String(name) === "count" ? `${Number(value ?? 0)} ciclos` : formatCurrency(Number(value ?? 0)),
+                    String(name) === "count" ? "Ciclos" : "Faturamento",
                   ]}
                   contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
                 />
