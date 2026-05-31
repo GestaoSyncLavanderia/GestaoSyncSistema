@@ -185,7 +185,7 @@ export default function SalesPage() {
               <YAxis tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={52} />
               <Tooltip
                 formatter={(value) => [formatCurrency(Number(value ?? 0)), "Faturamento"]}
-                labelFormatter={formatDateLabel}
+                labelFormatter={(label) => formatDateLabel(String(label ?? ""))}
                 contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
               />
               <Area type="monotone" dataKey="total" stroke="#3B82F6" strokeWidth={2} fill="url(#colorTotal)" dot={false} />
