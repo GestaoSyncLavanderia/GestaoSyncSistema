@@ -36,6 +36,7 @@ export async function GET() {
     ticketHoje, ticketOntem,
     fatMes, fatMesAnterior,
     fatAno, fatAnoAnterior,
+    avgMachinesHoje,
     rankingHoje,
   ] = await Promise.all([
     db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
@@ -48,6 +49,7 @@ export async function GET() {
     db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: prevMonthStart, lte: prevMonthEnd } } }),
     db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: yearStart } } }),
     db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: prevYearStart, lte: prevYearEnd } } }),
+    db.cycle.aggregate({ _avg: { machinesCount: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
     db.cycle.groupBy({
       by: ["laundryId"],
       _sum: { totalPaidValue: true },
@@ -91,14 +93,17 @@ export async function GET() {
   const diasMesAnt = new Date(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth() + 1, 0).getDate();
   const mediaDiariaAnt = diasMesAnt > 0 ? fatMesAntVal / diasMesAnt : 0;
 
+  const avgMachinesPerCycle = avgMachinesHoje._avg.machinesCount ?? 0;
+
   return NextResponse.json({
     kpis: {
-      fatHoje:    { value: fatHojeVal,   trend: pct(fatHojeVal, fatOntemVal) },
-      ciclosHoje: { value: ciclosHoje,   trend: pct(ciclosHoje, ciclosOntem) },
-      ticketMedio:{ value: ticketVal,    trend: pct(ticketVal, ticketAntVal) },
-      fatMes:     { value: fatMesVal,    trend: pct(fatMesVal, fatMesAntVal) },
-      mediaDiaria:{ value: mediaDiaria,  trend: pct(mediaDiaria, mediaDiariaAnt) },
-      fatAno:     { value: fatAnoVal,    trend: pct(fatAnoVal, fatAnoAntVal) },
+      fatHoje:            { value: fatHojeVal },
+      ciclosHoje:         { value: ciclosHoje },
+      ticketMedio:        { value: ticketVal },
+      avgMachinesPerCycle:{ value: avgMachinesPerCycle },
+      fatMes:             { value: fatMesVal },
+      mediaDiaria:        { value: mediaDiaria },
+      fatAno:             { value: fatAnoVal },
     },
     distribution,
   });

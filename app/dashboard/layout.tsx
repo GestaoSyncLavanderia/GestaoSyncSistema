@@ -1,13 +1,8 @@
 "use client";
 
 import { useState, useEffect, useTransition, Suspense } from "react";
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
-  LayoutDashboard,
-  Store,
-  ShoppingCart,
-  Users,
   RefreshCw,
   CheckCircle2,
   XCircle,
@@ -15,13 +10,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { PERIODS, parsePeriod, type PeriodKey } from "@/lib/period";
-
-const NAV = [
-  { href: "/dashboard", label: "Visão geral", icon: LayoutDashboard },
-  { href: "/dashboard/laundries", label: "Unidades", icon: Store },
-  { href: "/dashboard/sales", label: "Vendas", icon: ShoppingCart },
-  { href: "/dashboard/customers", label: "Clientes", icon: Users },
-];
+import { OdometerCounter } from "@/components/odometer-counter";
 
 function DashboardHeader() {
   const pathname = usePathname();
@@ -32,6 +21,8 @@ function DashboardHeader() {
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [fatMensal, setFatMensal] = useState(0);
+  const [fatAnual, setFatAnual] = useState(0);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -39,11 +30,14 @@ function DashboardHeader() {
       .then((r) => r.json())
       .then((d) => setLastSync(d.lastSync))
       .catch(() => {});
+    fetch("/api/kpis", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        setFatMensal(d.kpis?.fatMes?.value ?? 0);
+        setFatAnual(d.kpis?.fatAno?.value ?? 0);
+      })
+      .catch(() => {});
   }, []);
-
-  function navHref(href: string) {
-    return `${href}?period=${period}`;
-  }
 
   function handlePeriodChange(next: PeriodKey) {
     const params = new URLSearchParams(searchParams.toString());
@@ -70,6 +64,14 @@ function DashboardHeader() {
             ? "Sem novidades"
             : `+${data.newSales} vendas · +${data.newCycles} ciclos`
         );
+        // Atualiza impostômetro com novos valores (anima os dígitos)
+        fetch("/api/kpis", { cache: "no-store" })
+          .then((r) => r.json())
+          .then((d) => {
+            setFatMensal(d.kpis?.fatMes?.value ?? 0);
+            setFatAnual(d.kpis?.fatAno?.value ?? 0);
+          })
+          .catch(() => {});
         startTransition(() => router.refresh());
       } else {
         setSyncStatus("error");
@@ -84,31 +86,12 @@ function DashboardHeader() {
   }
 
   return (
+    <>
     <header className="sticky top-0 z-50 bg-white border-b border-[#E5E7EB] px-6 h-14 flex items-center justify-between">
       <div className="flex items-center gap-6">
         <span className="text-[15px] font-semibold text-gray-900 shrink-0">
           Painel de gestão e faturamento
         </span>
-        <nav className="flex items-center gap-1">
-          {NAV.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href;
-            return (
-              <Link
-                key={href}
-                href={navHref(href)}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors",
-                  active
-                    ? "bg-[#EFF6FF] text-[#3B82F6] font-medium"
-                    : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
-                )}
-              >
-                <Icon size={15} />
-                {label}
-              </Link>
-            );
-          })}
-        </nav>
       </div>
 
       <div className="flex items-center gap-3">
@@ -161,6 +144,11 @@ function DashboardHeader() {
         </Button>
       </div>
     </header>
+    <div className="flex gap-4 px-6 pt-4 pb-0">
+      <OdometerCounter value={fatMensal} label="Faturamento Mensal" />
+      <OdometerCounter value={fatAnual} label="Faturamento Anual" />
+    </div>
+    </>
   );
 }
 

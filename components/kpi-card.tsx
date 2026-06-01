@@ -1,4 +1,4 @@
-import { LucideIcon, TrendingUp, TrendingDown } from "lucide-react";
+import { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface KpiCardProps {
@@ -6,15 +6,10 @@ interface KpiCardProps {
   label: string;
   value: string;
   sub?: string;
-  trend?: number | null; // percentual vs período anterior; null = sem dados anteriores
   className?: string;
 }
 
-export function KpiCard({ icon: Icon, label, value, sub, trend, className }: KpiCardProps) {
-  const isPositive = trend !== null && trend !== undefined && trend >= 0;
-  const isNegative = trend !== null && trend !== undefined && trend < 0;
-  const hasTrend   = trend !== null && trend !== undefined;
-
+export function KpiCard({ icon: Icon, label, value, sub, className }: KpiCardProps) {
   return (
     <div
       className={cn(
@@ -30,20 +25,7 @@ export function KpiCard({ icon: Icon, label, value, sub, trend, className }: Kpi
       </div>
       <div>
         <p className="text-2xl font-semibold text-[#111827] leading-tight">{value}</p>
-        <div className="flex items-center gap-2 mt-1">
-          {sub && <p className="text-xs text-[#6B7280]">{sub}</p>}
-          {hasTrend && (
-            <span
-              className={cn(
-                "inline-flex items-center gap-0.5 text-xs font-medium",
-                isPositive ? "text-[#10B981]" : "text-red-500"
-              )}
-            >
-              {isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-              {isPositive ? "+" : ""}{trend}%
-            </span>
-          )}
-        </div>
+        {sub && <p className="text-xs text-[#6B7280] mt-1">{sub}</p>}
       </div>
     </div>
   );
