@@ -10,18 +10,21 @@ import {
 import { KpiCard } from "@/components/kpi-card";
 import { SCard } from "@/components/s-card";
 import { DistributionChart } from "@/components/distribution-chart";
+import { RevenueChart } from "@/components/revenue-chart";
+import { LaundryCard } from "@/components/laundry-card";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { parsePeriod, getPeriodDates } from "@/lib/period";
 
 // ── Tab config ─────────────────────────────────────────────────────────────
 
-type TabKey = "sales" | "cycles" | "machines";
+type TabKey = "sales" | "cycles" | "machines" | "units";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "sales",    label: "Vendas" },
   { key: "cycles",   label: "Ciclos" },
   { key: "machines", label: "Máquinas" },
+  { key: "units",    label: "Unidades" },
 ];
 
 // ── Shared types ───────────────────────────────────────────────────────────
@@ -481,6 +484,72 @@ function MachinesTabContent({ from, to }: { from: string; to: string }) {
   );
 }
 
+// ── Units tab ─────────────────────────────────────────────────────────────
+
+interface LaundryWithStats {
+  id: string; name: string; city: string; state: string;
+  street: string; neighborhood: string; ownerName: string;
+  ownerEmail: string; ownerMobile: string;
+  stats: { totalPaidValue: number; cyclesCount: number; ticketMedio: number };
+}
+
+function UnitsTabContent({ from, to }: { from: string; to: string }) {
+  const [laundries, setLaundries] = useState<LaundryWithStats[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    const p = new URLSearchParams({ from, to });
+    fetch(`/api/laundries?${p}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => setLaundries(d.laundries ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [from, to]);
+
+  const sorted = [...laundries].sort((a, b) => b.stats.totalPaidValue - a.stats.totalPaidValue);
+  const chartData = sorted
+    .filter((l) => l.stats.totalPaidValue > 0)
+    .map((l) => ({ name: l.name, total: l.stats.totalPaidValue }));
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-[14px] border border-[#E5E7EB] bg-white p-10 text-center text-sm text-gray-400">
+          Carregando...
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <SCard title="Comparativo de unidades">
+        {chartData.length === 0 ? (
+          <div className="py-10 text-center text-sm text-gray-500">Nenhum dado disponível no período.</div>
+        ) : (
+          <RevenueChart data={chartData} />
+        )}
+      </SCard>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {sorted.map((laundry, idx) => (
+          <LaundryCard
+            key={laundry.id}
+            name={laundry.name}
+            city={laundry.city}
+            state={laundry.state}
+            street={laundry.street}
+            neighborhood={laundry.neighborhood}
+            ownerName={laundry.ownerName}
+            position={idx + 1}
+            stats={laundry.stats}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main content ───────────────────────────────────────────────────────────
 
 function DashboardContent() {
@@ -527,6 +596,9 @@ function DashboardContent() {
 
       {/* Máquinas */}
       {activeTab === "machines" && <MachinesTabContent from={from} to={to} />}
+
+      {/* Unidades */}
+      {activeTab === "units" && <UnitsTabContent from={from} to={to} />}
     </div>
   );
 }

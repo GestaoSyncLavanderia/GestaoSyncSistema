@@ -24,8 +24,8 @@ function DigitColumn({ digit, animate }: { digit: number; animate: boolean }) {
         width: CELL_W,
         height: CELL_H,
         overflow: "hidden",
-        background: "#0F2744",
-        border: "1px solid #2D5A8E",
+        background: "#2D5A8E",
+        border: "1px solid #3D6A9E",
         borderRadius: 6,
         flexShrink: 0,
       }}
