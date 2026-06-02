@@ -23,7 +23,6 @@ export async function GET(req: NextRequest) {
   const page          = parseInt(searchParams.get("page") ?? "1");
   const limit         = parseInt(searchParams.get("limit") ?? "20");
 
-  // Filtro base (inclui paymentMethod) — usado na tabela paginada
   const where: any = {};
   if (laundryId)     where.laundryId     = laundryId;
   if (paymentMethod) where.paymentMethod = paymentMethod;
@@ -33,7 +32,6 @@ export async function GET(req: NextRequest) {
     if (to)   where.cycleDate.lte = endOfDay(new Date(to));
   }
 
-  // Filtro para distribuições — sem paymentMethod para mostrar todos os métodos
   const distribWhere: any = {};
   if (laundryId) distribWhere.laundryId = laundryId;
   if (from || to) {
@@ -56,32 +54,29 @@ export async function GET(req: NextRequest) {
     db.cycle.count({ where }),
     db.cycle.aggregate({
       where,
-      _sum: { totalPaidValue: true },
+      _sum: { totalValue: true },
       _count: { id: true },
     }),
     db.cycle.aggregate({
       where,
       _avg: { machinesCount: true },
     }),
-    // Distribuição por forma de pagamento
     db.cycle.groupBy({
       by: ["paymentMethod"],
       where: distribWhere,
-      _sum: { totalPaidValue: true },
+      _sum: { totalValue: true },
       _count: { id: true },
-      orderBy: { _sum: { totalPaidValue: "desc" } },
+      orderBy: { _sum: { totalValue: "desc" } },
     }),
-    // Distribuição por tipo de máquina
     db.cycle.groupBy({
       by: ["machineType"],
       where: distribWhere,
-      _sum: { totalPaidValue: true },
+      _sum: { totalValue: true },
       _count: { id: true },
-      orderBy: { _sum: { totalPaidValue: "desc" } },
+      orderBy: { _sum: { totalValue: "desc" } },
     }),
   ]);
 
-  // Evolução diária respeitando from/to do filtro (ou últimos 30 dias como fallback)
   const dailyFrom = from ? startOfDay(new Date(from)) : subDays(new Date(), 29);
   const dailyTo   = to   ? endOfDay(new Date(to))     : new Date();
   const dailyWhere: any = { cycleDate: { gte: dailyFrom, lte: dailyTo } };
@@ -89,7 +84,7 @@ export async function GET(req: NextRequest) {
 
   const dailyRaw = await db.cycle.groupBy({
     by: ["cycleDate"],
-    _sum: { totalPaidValue: true },
+    _sum: { totalValue: true },
     _count: { id: true },
     where: dailyWhere,
     orderBy: { cycleDate: "asc" },
@@ -98,7 +93,7 @@ export async function GET(req: NextRequest) {
   const dailyMap = new Map(
     dailyRaw.map((d) => [
       format(d.cycleDate, "yyyy-MM-dd"),
-      { total: d._sum.totalPaidValue ?? 0, cycles: d._count.id },
+      { total: d._sum.totalValue ?? 0, cycles: d._count.id },
     ])
   );
 
@@ -112,11 +107,11 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  const totalDistrib = paymentGroups.reduce((s, g) => s + (g._sum.totalPaidValue ?? 0), 0) || 1;
-  const totalMachine = machineGroups.reduce((s, g) => s + (g._sum.totalPaidValue ?? 0), 0) || 1;
+  const totalDistrib = paymentGroups.reduce((s, g) => s + (g._sum.totalValue ?? 0), 0) || 1;
+  const totalMachine = machineGroups.reduce((s, g) => s + (g._sum.totalValue ?? 0), 0) || 1;
 
   const byPayment = paymentGroups.map((g) => {
-    const val = g._sum.totalPaidValue ?? 0;
+    const val = g._sum.totalValue ?? 0;
     return {
       method: g.paymentMethod,
       label:  PAYMENT_LABELS[g.paymentMethod] ?? g.paymentMethod,
@@ -127,7 +122,7 @@ export async function GET(req: NextRequest) {
   });
 
   const byMachineType = machineGroups.map((g) => {
-    const val = g._sum.totalPaidValue ?? 0;
+    const val = g._sum.totalValue ?? 0;
     return {
       type:  g.machineType,
       label: MACHINE_LABELS[g.machineType] ?? g.machineType,
@@ -138,7 +133,7 @@ export async function GET(req: NextRequest) {
   });
 
   const ticketMedio =
-    agg._count.id > 0 ? (agg._sum.totalPaidValue ?? 0) / agg._count.id : 0;
+    agg._count.id > 0 ? (agg._sum.totalValue ?? 0) / agg._count.id : 0;
 
   return NextResponse.json({
     cycles,
@@ -146,7 +141,7 @@ export async function GET(req: NextRequest) {
     page,
     limit,
     agg: {
-      totalPaidValue: agg._sum.totalPaidValue ?? 0,
+      totalPaidValue: agg._sum.totalValue ?? 0,
       count: agg._count.id,
       ticketMedio,
       avgMachines: avgMachines._avg.machinesCount ?? 0,

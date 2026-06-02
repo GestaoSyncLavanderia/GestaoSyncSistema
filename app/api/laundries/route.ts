@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
 
   const cycleStats = await db.cycle.groupBy({
     by: ["laundryId"],
-    _sum: { totalPaidValue: true },
+    _sum: { totalValue: true },
     _count: { id: true },
     where: { cycleDate: { gte, lte } },
   });
@@ -23,10 +23,10 @@ export async function GET(req: NextRequest) {
     cycleStats.map((s) => [
       s.laundryId,
       {
-        totalPaidValue: s._sum.totalPaidValue ?? 0,
+        totalPaidValue: s._sum.totalValue ?? 0,
         cyclesCount: s._count.id,
         ticketMedio:
-          s._count.id > 0 ? (s._sum.totalPaidValue ?? 0) / s._count.id : 0,
+          s._count.id > 0 ? (s._sum.totalValue ?? 0) / s._count.id : 0,
       },
     ])
   );

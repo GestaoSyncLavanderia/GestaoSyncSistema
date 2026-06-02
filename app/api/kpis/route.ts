@@ -38,26 +38,28 @@ export async function GET() {
     fatAno, fatAnoAnterior,
     avgMachinesHoje,
     rankingHoje,
+    ciclosMes,
   ] = await Promise.all([
-    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
-    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: yesterdayStart, lte: yesterdayEnd } } }),
+    db.cycle.aggregate({ _sum: { totalValue: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
+    db.cycle.aggregate({ _sum: { totalValue: true }, where: { cycleDate: { gte: yesterdayStart, lte: yesterdayEnd } } }),
     db.cycle.count({ where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
     db.cycle.count({ where: { cycleDate: { gte: yesterdayStart, lte: yesterdayEnd } } }),
-    db.cycle.aggregate({ _avg: { totalPaidValue: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
-    db.cycle.aggregate({ _avg: { totalPaidValue: true }, where: { cycleDate: { gte: yesterdayStart, lte: yesterdayEnd } } }),
-    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: monthStart } } }),
-    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: prevMonthStart, lte: prevMonthEnd } } }),
-    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: yearStart } } }),
-    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: prevYearStart, lte: prevYearEnd } } }),
+    db.cycle.aggregate({ _avg: { totalValue: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
+    db.cycle.aggregate({ _avg: { totalValue: true }, where: { cycleDate: { gte: yesterdayStart, lte: yesterdayEnd } } }),
+    db.cycle.aggregate({ _sum: { totalValue: true }, where: { cycleDate: { gte: monthStart } } }),
+    db.cycle.aggregate({ _sum: { totalValue: true }, where: { cycleDate: { gte: prevMonthStart, lte: prevMonthEnd } } }),
+    db.cycle.aggregate({ _sum: { totalValue: true }, where: { cycleDate: { gte: yearStart } } }),
+    db.cycle.aggregate({ _sum: { totalValue: true }, where: { cycleDate: { gte: prevYearStart, lte: prevYearEnd } } }),
     db.cycle.aggregate({ _avg: { machinesCount: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
     db.cycle.groupBy({
       by: ["laundryId"],
-      _sum: { totalPaidValue: true },
+      _sum: { totalValue: true },
       _count: { id: true },
       where: { cycleDate: { gte: todayStart } },
-      orderBy: { _sum: { totalPaidValue: "desc" } },
+      orderBy: { _sum: { totalValue: "desc" } },
       take: 5,
     }),
+    db.cycle.count({ where: { cycleDate: { gte: monthStart } } }),
   ]);
 
   const laundryIds = rankingHoje.map((r) => r.laundryId);
@@ -75,21 +77,20 @@ export async function GET() {
     name: laundryMap[r.laundryId]?.name ?? r.laundryId,
     city: laundryMap[r.laundryId]?.city ?? "",
     state: laundryMap[r.laundryId]?.state ?? "",
-    total: r._sum.totalPaidValue ?? 0,
+    total: r._sum.totalValue ?? 0,
     cycles: r._count.id,
   }));
 
-  const fatHojeVal   = fatHoje._sum.totalPaidValue ?? 0;
-  const fatOntemVal  = fatOntem._sum.totalPaidValue ?? 0;
-  const ticketVal    = ticketHoje._avg.totalPaidValue ?? 0;
-  const ticketAntVal = ticketOntem._avg.totalPaidValue ?? 0;
-  const fatMesVal    = fatMes._sum.totalPaidValue ?? 0;
-  const fatMesAntVal = fatMesAnterior._sum.totalPaidValue ?? 0;
-  const fatAnoVal    = fatAno._sum.totalPaidValue ?? 0;
-  const fatAnoAntVal = fatAnoAnterior._sum.totalPaidValue ?? 0;
+  const fatHojeVal   = fatHoje._sum.totalValue ?? 0;
+  const fatOntemVal  = fatOntem._sum.totalValue ?? 0;
+  const ticketVal    = ticketHoje._avg.totalValue ?? 0;
+  const ticketAntVal = ticketOntem._avg.totalValue ?? 0;
+  const fatMesVal    = fatMes._sum.totalValue ?? 0;
+  const fatMesAntVal = fatMesAnterior._sum.totalValue ?? 0;
+  const fatAnoVal    = fatAno._sum.totalValue ?? 0;
+  const fatAnoAntVal = fatAnoAnterior._sum.totalValue ?? 0;
   const mediaDiaria  = daysElapsed > 0 ? fatMesVal / daysElapsed : 0;
 
-  // Média diária do mês anterior (mês cheio)
   const diasMesAnt = new Date(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth() + 1, 0).getDate();
   const mediaDiariaAnt = diasMesAnt > 0 ? fatMesAntVal / diasMesAnt : 0;
 
@@ -104,6 +105,7 @@ export async function GET() {
       fatMes:             { value: fatMesVal },
       mediaDiaria:        { value: mediaDiaria },
       fatAno:             { value: fatAnoVal },
+      ciclosMes:          { value: ciclosMes },
     },
     distribution,
   });

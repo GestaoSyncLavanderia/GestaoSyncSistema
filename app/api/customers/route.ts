@@ -65,10 +65,10 @@ export async function GET(req: NextRequest) {
   // Ranking top 10 clientes por gasto no período selecionado
   const rankingGroups = await db.cycle.groupBy({
     by: ["customerId"],
-    _sum: { totalPaidValue: true },
+    _sum: { totalValue: true },
     _count: { id: true },
     where: periodWhere,
-    orderBy: { _sum: { totalPaidValue: "desc" } },
+    orderBy: { _sum: { totalValue: "desc" } },
     take: 10,
   });
 
@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
     position: i + 1,
     customerId: r.customerId,
     name: nameMap[r.customerId] ?? r.customerId,
-    totalSpent: r._sum.totalPaidValue ?? 0,
+    totalSpent: r._sum.totalValue ?? 0,
     cycles: r._count.id,
   }));
 
@@ -94,7 +94,7 @@ export async function GET(req: NextRequest) {
   const balanceGroups = await db.cycle.groupBy({
     by: ["customerId"],
     where: { ...periodWhere, paymentMethod: "BALANCE" },
-    _sum: { totalPaidValue: true },
+    _sum: { totalValue: true },
     _count: { id: true },
     orderBy: { _count: { id: "desc" } },
     take: 20,
@@ -114,7 +114,7 @@ export async function GET(req: NextRequest) {
     customerId: r.customerId,
     name: balanceNameMap[r.customerId]?.name ?? r.customerId,
     document: balanceNameMap[r.customerId]?.document ?? "",
-    totalValue: r._sum.totalPaidValue ?? 0,
+    totalValue: r._sum.totalValue ?? 0,
     cycles: r._count.id,
   }));
 

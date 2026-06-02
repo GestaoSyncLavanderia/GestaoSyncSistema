@@ -33,7 +33,7 @@ async function queryDailyTotals(
     ? await db.$queryRaw`
         SELECT
           DATE_TRUNC('day', "cycleDate" AT TIME ZONE 'America/Sao_Paulo') AS day,
-          COALESCE(SUM("totalPaidValue"), 0)::float AS total,
+          COALESCE(SUM("totalValue"), 0)::float AS total,
           COUNT(*)                                  AS count
         FROM "Cycle"
         WHERE "cycleDate" >= ${dateFrom} AND "cycleDate" <= ${dateTo}
@@ -43,7 +43,7 @@ async function queryDailyTotals(
     : await db.$queryRaw`
         SELECT
           DATE_TRUNC('day', "cycleDate" AT TIME ZONE 'America/Sao_Paulo') AS day,
-          COALESCE(SUM("totalPaidValue"), 0)::float AS total,
+          COALESCE(SUM("totalValue"), 0)::float AS total,
           COUNT(*)                                  AS count
         FROM "Cycle"
         WHERE "cycleDate" >= ${dateFrom} AND "cycleDate" <= ${dateTo}
@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
     ? await db.$queryRaw`
         SELECT
           EXTRACT(DOW FROM "cycleDate" AT TIME ZONE 'America/Sao_Paulo')::int AS dow,
-          COALESCE(SUM("totalPaidValue"), 0)::float AS total,
+          COALESCE(SUM("totalValue"), 0)::float AS total,
           COUNT(*) AS count
         FROM "Cycle"
         WHERE "cycleDate" >= ${dateFrom} AND "cycleDate" <= ${dateTo}
@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
     : await db.$queryRaw`
         SELECT
           EXTRACT(DOW FROM "cycleDate" AT TIME ZONE 'America/Sao_Paulo')::int AS dow,
-          COALESCE(SUM("totalPaidValue"), 0)::float AS total,
+          COALESCE(SUM("totalValue"), 0)::float AS total,
           COUNT(*) AS count
         FROM "Cycle"
         WHERE "cycleDate" >= ${dateFrom} AND "cycleDate" <= ${dateTo}

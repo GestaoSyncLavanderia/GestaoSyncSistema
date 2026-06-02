@@ -4,10 +4,7 @@ const API_KEY = process.env.SISLAV_API_KEY!;
 async function get<T>(path: string, orgId?: string): Promise<T> {
   const headers: Record<string, string> = { "X-API-KEY": API_KEY };
   if (orgId) headers["X-ORG-ID"] = orgId;
-  const res = await fetch(`${BASE}${path}`, {
-    headers,
-    cache: "no-store",
-  });
+  const res = await fetch(`${BASE}${path}`, { headers, cache: "no-store" });
   if (!res.ok) throw new Error(`Sislav API error: ${res.status} — ${path}`);
   return res.json();
 }
@@ -17,10 +14,16 @@ async function getAll<T>(path: string, orgId?: string, limit = 100, since?: Date
   let all: T[] = [];
   while (true) {
     const sep = path.includes("?") ? "&" : "?";
-    const result = await get<{ data: T[]; pagination: { totalPages: number } }>(
-      `${path}${sep}page=${page}&limit=${limit}`,
-      orgId
-    );
+    let result: { data: T[]; pagination: { totalPages: number } };
+    try {
+      result = await get<{ data: T[]; pagination: { totalPages: number } }>(
+        `${path}${sep}page=${page}&limit=${limit}`,
+        orgId
+      );
+    } catch (err: any) {
+      if (err.message?.includes("429")) break; // retorna o que foi coletado até aqui
+      throw err;
+    }
     all = [...all, ...result.data];
 
     if (page >= result.pagination.totalPages) break;
@@ -40,8 +43,5 @@ export async function getLaundries() {
 }
 
 export async function getSales(laundryId: string, orgId: string, since?: Date) {
-  const path = since
-    ? `/v1/laundry/${laundryId}/sales?startDate=${since.toISOString()}`
-    : `/v1/laundry/${laundryId}/sales`;
-  return getAll<any>(path, orgId, 100, since);
+  return getAll<any>(`/v1/laundry/${laundryId}/sales`, orgId, 100, since);
 }

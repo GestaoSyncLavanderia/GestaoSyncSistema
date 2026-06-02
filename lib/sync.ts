@@ -108,8 +108,17 @@ export async function syncSales(
       ? allData.filter((s: any) => new Date(s.date) >= effectiveSince)
       : allData;
 
+    // Ignorar vendas sem cliente válido
+    const validData = data.filter((s: any) => s.customer?.id);
+
+    function parseBirthDate(raw: string | null | undefined): Date | null {
+      if (!raw) return null;
+      const d = new Date(raw);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
     // A: clientes primeiro (FK: customerLaundry e sale dependem de customer existir)
-    await batch(data, UPSERT_BATCH, async (s: any) => {
+    await batch(validData, UPSERT_BATCH, async (s: any) => {
       await db.customer.upsert({
         where: { id: s.customer.id },
         update: {
@@ -124,42 +133,45 @@ export async function syncSales(
           mobile: s.customer.mobile ?? null,
           document: s.customer.document ?? "",
           documentType: s.customer.documentType ?? "",
-          birthDate: s.customer.birthDate ? new Date(s.customer.birthDate) : null,
+          birthDate: parseBirthDate(s.customer.birthDate),
         },
       });
     });
 
-    // A: customerLaundry + sale em paralelo por venda (não dependem entre si)
-    await batch(data, UPSERT_BATCH, async (s: any) => {
-      await Promise.all([
-        db.customerLaundry.upsert({
-          where: { customerId_laundryId: { customerId: s.customer.id, laundryId } },
-          update: {},
-          create: { customerId: s.customer.id, laundryId },
-        }),
-        db.sale.upsert({
-          where: { id: s.id },
-          update: {},
-          create: {
-            id: s.id,
-            laundryId,
-            customerId: s.customer.id,
-            customerName: s.customer.name ?? "",
-            customerDoc: s.customer.document ?? "",
-            customerEmail: s.customer.email ?? null,
-            customerMobile: s.customer.mobile ?? null,
-            customerBirthDate: s.customer.birthDate ? new Date(s.customer.birthDate) : null,
-            documentType: s.customer.documentType ?? "",
-            paidValue: s.paidValue ?? 0,
-            totalValue: s.totalValue ?? 0,
-            paymentMethod: s.paymentMethod ?? "",
-            machineType: s.machineType ?? "",
-            machines: Array.isArray(s.machines) ? s.machines : [],
-            serviceType: s.serviceType ?? "",
-            date: new Date(s.date),
-          },
-        }),
-      ]);
+    // Upsert de customerLaundry por pares únicos (evita race condition de upserts paralelos)
+    const uniqueCustomerIds = [...new Set(validData.map((s: any) => s.customer.id as string))];
+    for (const customerId of uniqueCustomerIds) {
+      await db.customerLaundry.upsert({
+        where: { customerId_laundryId: { customerId, laundryId } },
+        update: {},
+        create: { customerId, laundryId },
+      });
+    }
+
+    // A: sales em paralelo
+    await batch(validData, UPSERT_BATCH, async (s: any) => {
+      await db.sale.upsert({
+        where: { id: s.id },
+        update: {},
+        create: {
+          id: s.id,
+          laundryId,
+          customerId: s.customer.id,
+          customerName: s.customer.name ?? "",
+          customerDoc: s.customer.document ?? "",
+          customerEmail: s.customer.email ?? null,
+          customerMobile: s.customer.mobile ?? null,
+          customerBirthDate: parseBirthDate(s.customer.birthDate),
+          documentType: s.customer.documentType ?? "",
+          paidValue: s.paidValue ?? 0,
+          totalValue: s.totalValue ?? 0,
+          paymentMethod: s.paymentMethod ?? "",
+          machineType: s.machineType ?? "",
+          machines: Array.isArray(s.machines) ? s.machines : [],
+          serviceType: s.serviceType ?? "",
+          date: new Date(s.date),
+        },
+      });
     });
 
     await db.syncLog.create({ data: { entity: "sales", status: "success" } });

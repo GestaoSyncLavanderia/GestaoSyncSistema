@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
   const days = Math.max(1, Math.round((lte.getTime() - gte.getTime()) / 86400000) + 1);
 
-  const [totalCount, avgAgg, avgWasherAgg, avgDryerAgg, allCycles, unitGroups, laundries] = await Promise.all([
+  const [totalCount, avgAgg, avgWasherAgg, avgDryerAgg, allCycles, unitGroups, laundries, avgByUnit] = await Promise.all([
     db.cycle.count({ where }),
     db.cycle.aggregate({ _avg: { machinesCount: true }, where }),
     db.cycle.aggregate({ _avg: { machinesCount: true }, where: { ...where, machineType: "WASHER" } }),
@@ -30,6 +30,12 @@ export async function GET(req: NextRequest) {
       _count: { id: true },
     }),
     db.laundry.findMany({ select: { id: true, name: true } }),
+    db.cycle.groupBy({
+      by: ["laundryId"],
+      where,
+      _avg: { machinesCount: true },
+      orderBy: { _avg: { machinesCount: "desc" } },
+    }),
   ]);
 
   // byDay — group by date string
@@ -73,6 +79,12 @@ export async function GET(req: NextRequest) {
     DRYER:  byUnit.reduce((s, u) => s + u.dryer,  0),
   };
 
+  const avgMachinesByUnit = avgByUnit.map((r) => ({
+    laundryId:   r.laundryId,
+    name:        laundryNameMap[r.laundryId] ?? r.laundryId,
+    avgMachines: Number((r._avg.machinesCount ?? 0).toFixed(2)),
+  }));
+
   return NextResponse.json({
     total: totalCount,
     avgPerDay: totalCount / days,
@@ -83,5 +95,6 @@ export async function GET(req: NextRequest) {
     byDayOfWeek,
     byUnit,
     byMachineType,
+    avgMachinesByUnit,
   });
 }

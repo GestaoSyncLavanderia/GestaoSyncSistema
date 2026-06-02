@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useState, Suspense, useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { Repeat, TrendingUp, WashingMachine, Store, Tag, Wind } from "lucide-react";
 import {
@@ -18,9 +18,10 @@ import { parsePeriod, getPeriodDates } from "@/lib/period";
 
 // ── Tab config ─────────────────────────────────────────────────────────────
 
-type TabKey = "sales" | "cycles" | "machines" | "units";
+type TabKey = "general" | "sales" | "cycles" | "machines" | "units";
 
 const TABS: { key: TabKey; label: string }[] = [
+  { key: "general",  label: "Geral" },
   { key: "sales",    label: "Vendas" },
   { key: "cycles",   label: "Ciclos" },
   { key: "machines", label: "Máquinas" },
@@ -55,6 +56,7 @@ interface CyclesData {
   byDayOfWeek: CyclesByDowItem[];
   byUnit: CyclesByUnitItem[];
   byMachineType: { WASHER: number; DRYER: number };
+  avgMachinesByUnit?: { laundryId: string; name: string; avgMachines: number }[];
 }
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
@@ -550,6 +552,373 @@ function UnitsTabContent({ from, to }: { from: string; to: string }) {
   );
 }
 
+// ── General tab ────────────────────────────────────────────────────────────
+
+interface GeneralKpisState {
+  fatHoje: number; ciclosHoje: number; ticketMedio: number;
+  ciclosMes: number; fatMes: number; fatAno: number;
+}
+interface LastSaleItem {
+  id: string; laundryName: string; machineLabel: string;
+  paymentLabel: string; paidValue: number;
+}
+interface AvgByUnitItem { laundryId: string; name: string; avgMachines: number; }
+
+function SectionTitle({ label }: { label: string }) {
+  return (
+    <div
+      style={{
+        fontSize: 11, fontWeight: 800, color: "#9CA3AF",
+        textTransform: "uppercase" as const, letterSpacing: "0.08em",
+        marginTop: 28, marginBottom: 12,
+        borderBottom: "2px solid #E5E7EB", paddingBottom: 6,
+      }}
+    >
+      {label}
+    </div>
+  );
+}
+
+function GeneralTabContent() {
+  const [kpis, setKpis]                       = useState<GeneralKpisState | null>(null);
+  const [dailyRevenue, setDailyRevenue]        = useState<DayPoint[]>([]);
+  const [comparison, setComparison]            = useState<ComparisonData | null>(null);
+  const [cyclesData, setCyclesData]            = useState<CyclesData | null>(null);
+  const [avgByUnit, setAvgByUnit]              = useState<AvgByUnitItem[]>([]);
+  const [laundries, setLaundries]              = useState<LaundryWithStats[]>([]);
+  const [lastSales, setLastSales]              = useState<LastSaleItem[]>([]);
+  const [loading, setLoading]                  = useState(true);
+
+  const { from, to } = useMemo(() => getPeriodDates("7d"), []);
+
+  useEffect(() => {
+    const sp = new URLSearchParams({ from, to });
+    Promise.all([
+      fetch("/api/kpis",                { cache: "no-store" }).then((r) => r.json()),
+      fetch(`/api/sales?${sp}`,         { cache: "no-store" }).then((r) => r.json()),
+      fetch(`/api/analytics?${sp}`,     { cache: "no-store" }).then((r) => r.json()),
+      fetch(`/api/cycles?${sp}`,        { cache: "no-store" }).then((r) => r.json()),
+      fetch(`/api/laundries?${sp}`,     { cache: "no-store" }).then((r) => r.json()),
+      fetch("/api/last-sales?limit=20", { cache: "no-store" }).then((r) => r.json()),
+    ])
+      .then(([kpisRes, salesRes, analyticsRes, cyclesRes, laundriesRes, lastSalesRes]) => {
+        setKpis({
+          fatHoje:    kpisRes.kpis?.fatHoje?.value     ?? 0,
+          ciclosHoje: kpisRes.kpis?.ciclosHoje?.value  ?? 0,
+          ticketMedio: kpisRes.kpis?.ticketMedio?.value ?? 0,
+          ciclosMes:  kpisRes.kpis?.ciclosMes?.value   ?? 0,
+          fatMes:     kpisRes.kpis?.fatMes?.value      ?? 0,
+          fatAno:     kpisRes.kpis?.fatAno?.value      ?? 0,
+        });
+        setDailyRevenue(salesRes.dailyEvolution ?? []);
+        setComparison(analyticsRes.comparison ?? null);
+        setCyclesData(cyclesRes);
+        setAvgByUnit(cyclesRes.avgMachinesByUnit ?? []);
+        setLaundries(laundriesRes.laundries ?? []);
+        setLastSales(lastSalesRes.sales ?? []);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [from, to]);
+
+  if (loading) {
+    return (
+      <div className="rounded-[14px] border border-[#E5E7EB] bg-white p-10 text-center text-sm text-gray-400">
+        Carregando...
+      </div>
+    );
+  }
+
+  const sortedLaundries = [...laundries].sort((a, b) => b.stats.totalPaidValue - a.stats.totalPaidValue);
+  const top8        = sortedLaundries.slice(0, 8);
+  const maxRevenue  = top8[0]?.stats.totalPaidValue ?? 1;
+  const donutData   = sortedLaundries.slice(0, 5).map((l) => ({ name: l.name, total: l.stats.totalPaidValue }));
+  const top10Avg    = avgByUnit.slice(0, 10);
+  const maxAvg      = Math.max(...top10Avg.map((u) => u.avgMachines), 1);
+  const top10AvgDisplay = top10Avg.map((u) => ({
+    ...u,
+    displayName: u.name.length > 22 ? u.name.slice(0, 20) + "…" : u.name,
+  }));
+  const avgChartHeight = Math.max(280, top10Avg.length * 44);
+
+  return (
+    <div className="pb-14">
+      <p className="text-xs text-[#9CA3AF] mb-4">
+        Visão geral sempre exibe os últimos 7 dias. Use as abas específicas para outros períodos.
+      </p>
+
+      {/* ── 1: KPI Cards ───────────────────────────────── */}
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <KpiCard icon={TrendingUp}     label="Faturamento hoje"   value={formatCurrency(kpis?.fatHoje    ?? 0)} />
+        <KpiCard icon={Repeat}         label="Ciclos hoje"        value={`${kpis?.ciclosHoje ?? 0}`} />
+        <KpiCard icon={Tag}            label="Ticket médio hoje"  value={formatCurrency(kpis?.ticketMedio ?? 0)} />
+        <KpiCard icon={WashingMachine} label="Ciclos do mês"      value={`${kpis?.ciclosMes  ?? 0}`} />
+        <KpiCard icon={Store}          label="Faturamento mensal" value={formatCurrency(kpis?.fatMes    ?? 0)} />
+        <KpiCard icon={Wind}           label="Faturamento anual"  value={formatCurrency(kpis?.fatAno    ?? 0)} />
+      </div>
+
+      {/* ── 2: Faturamento ─────────────────────────────── */}
+      <SectionTitle label="Faturamento" />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <SCard title="Evolução diária (últimos 7 dias)">
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={dailyRevenue} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="genRevGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#3B82F6" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                <XAxis dataKey="date" tickFormatter={formatDateLabel} tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={52} />
+                <Tooltip
+                  formatter={(value) => [formatCurrency(Number(value ?? 0)), "Faturamento"]}
+                  labelFormatter={(label) => formatDateLabel(String(label ?? ""))}
+                  contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
+                />
+                <Area type="monotone" dataKey="total" stroke="#3B82F6" strokeWidth={2} fill="url(#genRevGrad)" dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </SCard>
+
+        <SCard title="Comparativo de período">
+          {comparison ? (
+            <>
+              <div className="flex flex-wrap items-center gap-4 mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-[#3B82F6] shrink-0" />
+                  <span className="text-xs text-[#6B7280]">Atual ({comparison.currentLabel})</span>
+                  <span className="text-sm font-semibold text-[#111827]">{formatCurrency(comparison.currentTotal)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-[#D1D5DB] shrink-0" />
+                  <span className="text-xs text-[#6B7280]">Anterior ({comparison.previousLabel})</span>
+                  <span className="text-sm font-semibold text-[#111827]">{formatCurrency(comparison.previousTotal)}</span>
+                </div>
+                {comparison.changePct !== null && (
+                  <span className={`text-sm font-semibold ${comparison.changePct >= 0 ? "text-[#10B981]" : "text-red-500"}`}>
+                    {comparison.changePct >= 0 ? "+" : ""}{comparison.changePct}% vs. anterior
+                  </span>
+                )}
+              </div>
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={comparison.series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false} axisLine={false} />
+                    <YAxis tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={52} />
+                    <Tooltip
+                      formatter={(value, name) => [
+                        formatCurrency(Number(value ?? 0)),
+                        String(name) === "current"
+                          ? `Atual (${comparison.currentLabel})`
+                          : `Anterior (${comparison.previousLabel})`,
+                      ]}
+                      contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
+                    />
+                    <Line type="monotone" dataKey="current"  stroke="#3B82F6" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                    <Line type="monotone" dataKey="previous" stroke="#D1D5DB" strokeWidth={2} strokeDasharray="4 4" dot={false} activeDot={{ r: 4 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-gray-400 text-center py-4">Sem dados de comparativo</p>
+          )}
+        </SCard>
+      </div>
+
+      {/* ── 3: Ciclos ──────────────────────────────────── */}
+      <SectionTitle label="Ciclos" />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <SCard title="Evolução de ciclos (últimos 7 dias)">
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={cyclesData?.byDay ?? []} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="genCyclesGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#10B981" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                <XAxis dataKey="date" tickFormatter={formatDateLabel} tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={28} allowDecimals={false} />
+                <Tooltip
+                  formatter={(value) => [`${Number(value ?? 0)} ciclos`, "Ciclos"]}
+                  labelFormatter={(label) => formatDateLabel(String(label ?? ""))}
+                  contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
+                />
+                <Area type="monotone" dataKey="count" stroke="#10B981" strokeWidth={2} fill="url(#genCyclesGrad)" dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </SCard>
+
+        <SCard title="Ciclos por dia da semana">
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={cyclesData?.byDayOfWeek ?? []} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={28} allowDecimals={false} />
+                <Tooltip
+                  formatter={(value) => [`${Number(value ?? 0)} ciclos`, "Ciclos"]}
+                  contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
+                />
+                <Bar dataKey="count" fill="#6366F1" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </SCard>
+      </div>
+
+      {/* ── 4: Máquinas ────────────────────────────────── */}
+      <SectionTitle label="Máquinas" />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <SCard title="Distribuição por tipo">
+          <DistributionChart
+            data={[
+              { name: "Lavadoras", total: cyclesData?.byMachineType?.WASHER ?? 0 },
+              { name: "Secadoras", total: cyclesData?.byMachineType?.DRYER  ?? 0 },
+            ]}
+          />
+        </SCard>
+
+        <SCard title="Média de máquinas por ciclo (por unidade)">
+          {top10AvgDisplay.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4">Sem dados no período</p>
+          ) : (
+            <div style={{ height: avgChartHeight }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={top10AvgDisplay} layout="vertical" margin={{ top: 4, right: 32, left: 8, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
+                  <XAxis
+                    type="number"
+                    domain={[0, Math.ceil(maxAvg + 0.5)]}
+                    tick={{ fontSize: 10, fill: "#9CA3AF" }}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="displayName"
+                    width={160}
+                    tick={{ fontSize: 10, fill: "#374151" }}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <Tooltip
+                    labelFormatter={(_label, payload) =>
+                      (payload?.[0]?.payload as AvgByUnitItem | undefined)?.name ?? String(_label)
+                    }
+                    formatter={(value) => [`${Number(value ?? 0).toFixed(1)} máq/ciclo`, "Média"]}
+                    contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
+                  />
+                  <Bar dataKey="avgMachines" fill="#F97316" radius={[0, 3, 3, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </SCard>
+      </div>
+
+      {/* ── 5: Unidades ────────────────────────────────── */}
+      <SectionTitle label="Unidades" />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <SCard title="Ranking de unidades (top 8 por faturamento)">
+          {top8.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4">Sem dados no período</p>
+          ) : (
+            <div className="divide-y divide-[#E5E7EB]">
+              {top8.map((l) => {
+                const pct = maxRevenue > 0 ? Math.round((l.stats.totalPaidValue / maxRevenue) * 100) : 0;
+                return (
+                  <div key={l.id} className="py-2 first:pt-0 last:pb-0">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-sm font-medium text-gray-900 truncate flex-1">{l.name}</span>
+                      <div className="flex items-center gap-3 ml-3 shrink-0">
+                        <span className="text-xs text-[#6B7280]">{l.stats.cyclesCount} ciclos</span>
+                        <span className="text-sm font-semibold text-[#10B981]">{formatCurrency(l.stats.totalPaidValue)}</span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-[#F3F4F6]">
+                      <div className="h-full rounded-full transition-all duration-500 bg-[#3B82F6]" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </SCard>
+
+        <SCard title="Distribuição de faturamento (top 5 unidades)">
+          {donutData.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4">Sem dados no período</p>
+          ) : (
+            <DistributionChart data={donutData} />
+          )}
+        </SCard>
+      </div>
+
+      {/* ── 6: Ticker ──────────────────────────────────── */}
+      {lastSales.length > 0 && (
+        <>
+          <style>{`
+            @keyframes ticker-scroll {
+              0%   { transform: translateX(0); }
+              100% { transform: translateX(-50%); }
+            }
+            .ticker-track {
+              display: flex;
+              white-space: nowrap;
+              animation: ticker-scroll 60s linear infinite;
+              will-change: transform;
+            }
+          `}</style>
+          <div
+            className="fixed bottom-0 left-0 right-0 overflow-hidden z-40"
+            style={{ background: "#1E3A5F", display: "flex", alignItems: "center" }}
+          >
+            {/* Prefixo fixo */}
+            <div
+              style={{
+                flexShrink: 0,
+                padding: "10px 20px",
+                borderRight: "1px solid rgba(255,255,255,0.12)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#CBD5E1", whiteSpace: "nowrap" }}>
+                Dados da última sincronização:
+              </span>
+              <span style={{ color: "#3B82F6", fontSize: 14, fontWeight: 700 }}>→</span>
+            </div>
+            {/* Conteúdo rolante */}
+            <div style={{ flex: 1, overflow: "hidden", padding: "10px 0" }}>
+              <div className="ticker-track">
+                {[...lastSales, ...lastSales].map((s, i) => (
+                  <span key={`${s.id}-${i}`} style={{ fontSize: 13, fontWeight: 500, color: "#E2E8F0" }}>
+                    <span style={{ paddingLeft: 32 }}>
+                      {s.laundryName} · {s.machineLabel} · {formatCurrency(s.paidValue)} · {s.paymentLabel}
+                    </span>
+                    <span style={{ color: "#3B82F6", margin: "0 8px" }}>→</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Main content ───────────────────────────────────────────────────────────
 
 function DashboardContent() {
@@ -557,7 +926,7 @@ function DashboardContent() {
   const router = useRouter();
   const pathname = usePathname();
 
-  const activeTab = (searchParams.get("tab") as TabKey) ?? "sales";
+  const activeTab = (searchParams.get("tab") as TabKey) ?? "general";
   const period = parsePeriod(searchParams.get("period"));
   const { from, to } = getPeriodDates(period);
 
@@ -587,6 +956,9 @@ function DashboardContent() {
           </button>
         ))}
       </div>
+
+      {/* Geral */}
+      {activeTab === "general" && <GeneralTabContent />}
 
       {/* Vendas */}
       {activeTab === "sales" && <SalesTabContent from={from} to={to} />}
