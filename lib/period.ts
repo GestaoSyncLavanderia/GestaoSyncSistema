@@ -16,7 +16,7 @@ export function parsePeriod(value: string | null): PeriodKey {
 
 export function getPeriodDates(period: PeriodKey = "30d"): { from: string; to: string } {
   if (period === "all") {
-    return { from: "2026-01-07", to: format(new Date(), "yyyy-MM-dd") };
+    return { from: "2020-01-01", to: format(new Date(), "yyyy-MM-dd") };
   }
   const days = period === "7d" ? 7 : period === "90d" ? 90 : 30;
   return {

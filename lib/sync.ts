@@ -2,9 +2,9 @@ import { db } from "./db";
 import * as api from "./sislav";
 import { startOfDay, subHours } from "date-fns";
 
-const LAUNDRY_BATCH = 5;   // D: mantém 5 (seguro); testar C=20 separadamente
+const LAUNDRY_BATCH = 5;
 const CYCLE_BATCH   = 20;
-const UPSERT_BATCH  = 20;  // A: upserts de cliente/venda em paralelo
+const UPSERT_BATCH  = 20;
 
 async function batch<T>(items: T[], size: number, fn: (item: T) => Promise<void>) {
   for (let i = 0; i < items.length; i += size) {
@@ -42,28 +42,34 @@ export async function syncAll(): Promise<{
     : new Set<string>();
 
   const t2 = Date.now();
-  const salesBefore = await db.sale.count();
-  await batch(laundries, LAUNDRY_BATCH, async (l) => {
+  const salesBefore  = await db.sale.count();
+  const cyclesBefore = await db.cycle.count();
+
+  // Full sync (sem histórico): processa 1 por vez para não bater rate limit 429
+  // Incremental: paralelo é seguro (poucas páginas por laundry)
+  const fullSyncLaundries = laundries.filter((l) => !laundriesWithSales.has(l.id));
+  const incrSyncLaundries = laundries.filter((l) => laundriesWithSales.has(l.id));
+
+  await batch(fullSyncLaundries, 1, async (l) => {
     const err = await syncSales(l.id, l.organizationId, laundriesWithSales, since);
     if (err) errors.push(`${l.id}: ${err}`);
   });
-  const newSales = (await db.sale.count()) - salesBefore;
-  timing.syncSales = Date.now() - t2;
+  await batch(incrSyncLaundries, LAUNDRY_BATCH, async (l) => {
+    const err = await syncSales(l.id, l.organizationId, laundriesWithSales, since);
+    if (err) errors.push(`${l.id}: ${err}`);
+  });
 
-  const t3 = Date.now();
-  const cyclesBefore = await db.cycle.count();
-  await buildCycles(since);
+  const newSales  = (await db.sale.count())  - salesBefore;
   const newCycles = (await db.cycle.count()) - cyclesBefore;
-  timing.buildCycles = Date.now() - t3;
+  timing.syncSales = Date.now() - t2;
+  timing.total     = Date.now() - t0;
 
-  timing.total = Date.now() - t0;
   return { newSales, newCycles, timing, errors };
 }
 
 export async function syncLaundries() {
   try {
     const data = await api.getLaundries();
-    // B: upserts em paralelo em vez de loop sequencial
     await batch(data, 10, async (l) => {
       await db.laundry.upsert({
         where: { id: l.id },
@@ -94,6 +100,12 @@ export async function syncLaundries() {
   }
 }
 
+function parseBirthDate(raw: string | null | undefined): Date | null {
+  if (!raw) return null;
+  const d = new Date(raw);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 // Retorna string de erro em caso de falha, null em caso de sucesso
 export async function syncSales(
   laundryId: string,
@@ -111,13 +123,7 @@ export async function syncSales(
     // Ignorar vendas sem cliente válido
     const validData = data.filter((s: any) => s.customer?.id);
 
-    function parseBirthDate(raw: string | null | undefined): Date | null {
-      if (!raw) return null;
-      const d = new Date(raw);
-      return isNaN(d.getTime()) ? null : d;
-    }
-
-    // A: clientes primeiro (FK: customerLaundry e sale dependem de customer existir)
+    // Clientes primeiro (FK: customerLaundry e sale dependem de customer existir)
     await batch(validData, UPSERT_BATCH, async (s: any) => {
       await db.customer.upsert({
         where: { id: s.customer.id },
@@ -138,7 +144,7 @@ export async function syncSales(
       });
     });
 
-    // Upsert de customerLaundry por pares únicos (evita race condition de upserts paralelos)
+    // customerLaundry por pares únicos (evita race condition)
     const uniqueCustomerIds = [...new Set(validData.map((s: any) => s.customer.id as string))];
     for (const customerId of uniqueCustomerIds) {
       await db.customerLaundry.upsert({
@@ -148,7 +154,7 @@ export async function syncSales(
       });
     }
 
-    // A: sales em paralelo
+    // Sales em paralelo
     await batch(validData, UPSERT_BATCH, async (s: any) => {
       await db.sale.upsert({
         where: { id: s.id },
@@ -174,6 +180,9 @@ export async function syncSales(
       });
     });
 
+    // Ciclos construídos por lavanderia logo após as vendas — evita carregar todas as vendas em memória de uma vez
+    await buildCyclesForLaundry(laundryId, effectiveSince);
+
     await db.syncLog.create({ data: { entity: "sales", status: "success" } });
     return null;
   } catch (err: any) {
@@ -184,61 +193,66 @@ export async function syncSales(
   }
 }
 
-export async function buildCycles(since?: Date) {
-  try {
-    const allSales = await db.sale.findMany({
-      where: since ? { date: { gte: startOfDay(since) } } : {},
-    });
+// Reconstrói ciclos apenas para uma lavanderia, opcionalmente filtrando por data
+export async function buildCyclesForLaundry(laundryId: string, since?: Date) {
+  const sales = await db.sale.findMany({
+    where: {
+      laundryId,
+      ...(since ? { date: { gte: startOfDay(since) } } : {}),
+    },
+  });
 
-    const groupMap = new Map<string, typeof allSales>();
-    for (const s of allSales) {
-      const dayKey = startOfDay(s.date).toISOString();
-      const key = `${s.laundryId}||${s.customerId}||${s.machineType}||${dayKey}`;
-      if (!groupMap.has(key)) groupMap.set(key, []);
-      groupMap.get(key)!.push(s);
-    }
+  const groupMap = new Map<string, typeof sales>();
+  for (const s of sales) {
+    const dayKey = startOfDay(s.date).toISOString();
+    const key = `${s.customerId}||${s.machineType}||${dayKey}`;
+    if (!groupMap.has(key)) groupMap.set(key, []);
+    groupMap.get(key)!.push(s);
+  }
 
-    await batch([...groupMap.values()], CYCLE_BATCH, async (daySales) => {
-      const { laundryId, customerId, machineType } = daySales[0];
-      const cycleDate = startOfDay(daySales[0].date);
-      const allMachines = daySales.flatMap((s) => s.machines) as any;
+  await batch([...groupMap.values()], CYCLE_BATCH, async (daySales) => {
+    const { customerId, machineType } = daySales[0];
+    const cycleDate   = startOfDay(daySales[0].date);
+    const allMachines = daySales.flatMap((s) => s.machines) as any;
 
-      await db.cycle.upsert({
-        where: {
-          laundryId_customerId_machineType_cycleDate: {
-            laundryId,
-            customerId,
-            machineType,
-            cycleDate,
-          },
-        },
-        update: {
-          machinesUsed: allMachines,
-          machinesCount: allMachines.length,
-          totalPaidValue: daySales.reduce((a, s) => a + s.paidValue, 0),
-          totalValue: daySales.reduce((a, s) => a + s.totalValue, 0),
-          salesCount: daySales.length,
-          syncedAt: new Date(),
-        },
-        create: {
+    await db.cycle.upsert({
+      where: {
+        laundryId_customerId_machineType_cycleDate: {
           laundryId,
           customerId,
           machineType,
           cycleDate,
-          machinesUsed: allMachines,
-          machinesCount: allMachines.length,
-          totalPaidValue: daySales.reduce((a, s) => a + s.paidValue, 0),
-          totalValue: daySales.reduce((a, s) => a + s.totalValue, 0),
-          salesCount: daySales.length,
-          paymentMethod: daySales[0].paymentMethod,
         },
-      });
+      },
+      update: {
+        machinesUsed:   allMachines,
+        machinesCount:  allMachines.length,
+        totalPaidValue: daySales.reduce((a, s) => a + s.paidValue, 0),
+        totalValue:     daySales.reduce((a, s) => a + s.totalValue, 0),
+        salesCount:     daySales.length,
+        syncedAt:       new Date(),
+      },
+      create: {
+        laundryId,
+        customerId,
+        machineType,
+        cycleDate,
+        machinesUsed:   allMachines,
+        machinesCount:  allMachines.length,
+        totalPaidValue: daySales.reduce((a, s) => a + s.paidValue, 0),
+        totalValue:     daySales.reduce((a, s) => a + s.totalValue, 0),
+        salesCount:     daySales.length,
+        paymentMethod:  daySales[0].paymentMethod,
+      },
     });
+  });
+}
 
-    await db.syncLog.create({ data: { entity: "cycles", status: "success" } });
-  } catch (err: any) {
-    await db.syncLog.create({
-      data: { entity: "cycles", status: "error", message: err.message },
-    });
+// Mantido para compatibilidade com imports externos (ex: api/sync/test)
+export async function buildCycles(since?: Date) {
+  const laundries = await db.laundry.findMany({ select: { id: true } });
+  for (const l of laundries) {
+    await buildCyclesForLaundry(l.id, since);
   }
+  await db.syncLog.create({ data: { entity: "cycles", status: "success" } });
 }

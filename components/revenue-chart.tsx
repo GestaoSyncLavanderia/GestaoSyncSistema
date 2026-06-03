@@ -32,27 +32,45 @@ function CustomTooltip({ active, payload }: any) {
 }
 
 export function RevenueChart({ data }: RevenueChartProps) {
+  const chartData = data.map((d) => ({
+    ...d,
+    displayName: d.name.length > 22 ? d.name.slice(0, 20) + "…" : d.name,
+  }));
+  const maxVal = Math.max(...data.map((d) => d.total), 1);
+  const height = Math.max(300, chartData.length * 44);
+
   return (
-    <ResponsiveContainer width="100%" height={240}>
-      <BarChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" vertical={false} />
-        <XAxis
-          dataKey="name"
-          tick={{ fontSize: 11, fill: "#9CA3AF" }}
-          axisLine={false}
-          tickLine={false}
-          interval={0}
-        />
-        <YAxis
-          tickFormatter={formatCurrencyK}
-          tick={{ fontSize: 11, fill: "#9CA3AF" }}
-          axisLine={false}
-          tickLine={false}
-          width={60}
-        />
-        <Tooltip content={<CustomTooltip />} cursor={{ fill: "#F9FAFB" }} />
-        <Bar dataKey="total" fill="#3B82F6" radius={[4, 4, 0, 0]} maxBarSize={48} />
-      </BarChart>
-    </ResponsiveContainer>
+    <div style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart
+          data={chartData}
+          layout="vertical"
+          margin={{ top: 4, right: 48, left: 8, bottom: 0 }}
+        >
+          <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
+          <XAxis
+            type="number"
+            domain={[0, Math.ceil(maxVal * 1.05)]}
+            tickFormatter={formatCurrencyK}
+            tick={{ fontSize: 10, fill: "#9CA3AF" }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            type="category"
+            dataKey="displayName"
+            width={160}
+            tick={{ fontSize: 10, fill: "#374151" }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <Tooltip
+            content={<CustomTooltip />}
+            cursor={{ fill: "#F9FAFB" }}
+          />
+          <Bar dataKey="total" fill="#3B82F6" radius={[0, 4, 4, 0]} maxBarSize={32} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
