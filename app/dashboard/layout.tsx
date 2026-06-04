@@ -1,12 +1,15 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { PERIODS, parsePeriod, type PeriodKey } from "@/lib/period";
 import { OdometerCounter } from "@/components/odometer-counter";
+import { LogOut, Play, Pause } from "lucide-react";
 
 const MONO = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+const CYCLE_ORDER: PeriodKey[] = ["7d", "30d", "90d", "all"];
 
 function DashboardHeader() {
   const pathname = usePathname();
@@ -14,24 +17,41 @@ function DashboardHeader() {
   const searchParams = useSearchParams();
   const period = parsePeriod(searchParams.get("period"));
 
+  const [autoPlay, setAutoPlay] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
+  const prevSyncRef = useRef<string | null>(null);
   const [clockDate, setClockDate] = useState("");
   const [clockTime, setClockTime] = useState("");
   const [fatMensal, setFatMensal] = useState(0);
   const [fatAnual, setFatAnual] = useState(0);
 
   useEffect(() => {
-    fetch("/api/sync/last")
-      .then((r) => r.json())
-      .then((d) => setLastSync(d.lastSync ?? null))
-      .catch(() => {});
-    fetch("/api/kpis", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d) => {
-        setFatMensal(d.kpis?.fatMes?.value ?? 0);
-        setFatAnual(d.kpis?.fatAno?.value ?? 0);
-      })
-      .catch(() => {});
+    function fetchData() {
+      fetch("/api/sync/last")
+        .then((r) => r.json())
+        .then((d) => {
+          const newId: string | null = d.lastSyncId ?? null;
+          // Se já havia um ID anterior e mudou, novo sync detectado — recarrega tudo
+          if (prevSyncRef.current !== null && newId !== prevSyncRef.current) {
+            window.location.reload();
+            return;
+          }
+          prevSyncRef.current = newId;
+          setLastSync(d.lastSync ?? null);
+        })
+        .catch(() => {});
+      fetch("/api/kpis", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((d) => {
+          setFatMensal(d.kpis?.fatMes?.value ?? 0);
+          setFatAnual(d.kpis?.fatAno?.value ?? 0);
+        })
+        .catch(() => {});
+    }
+
+    fetchData();
+    const id = setInterval(fetchData, 60 * 1000); // verifica a cada 1 minuto
+    return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -60,6 +80,17 @@ function DashboardHeader() {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    if (!autoPlay) return;
+    const id = setInterval(() => {
+      const idx = CYCLE_ORDER.indexOf(period);
+      const next = CYCLE_ORDER[(idx + 1) % CYCLE_ORDER.length];
+      handlePeriodChange(next);
+    }, 15000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPlay, period]);
+
   function handlePeriodChange(next: PeriodKey) {
     const params = new URLSearchParams(searchParams.toString());
     params.set("period", next);
@@ -87,22 +118,38 @@ function DashboardHeader() {
 
         {/* Lado direito: filtros de período + relógio */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center rounded-lg border border-[#E5E7EB] bg-[#F8FAFC] p-0.5">
-            {PERIODS.map((p) => (
-              <button
-                key={p.value}
-                type="button"
-                onClick={() => handlePeriodChange(p.value)}
-                className={cn(
-                  "rounded-md px-3 py-1 text-xs font-medium transition-colors",
-                  period === p.value
-                    ? "bg-white text-[#3B82F6] shadow-sm border border-[#E5E7EB]"
-                    : "text-gray-500 hover:text-gray-700"
-                )}
-              >
-                {p.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-1.5">
+            <div className="flex items-center rounded-lg border border-[#E5E7EB] bg-[#F8FAFC] p-0.5">
+              {PERIODS.map((p) => (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => handlePeriodChange(p.value)}
+                  className={cn(
+                    "rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                    period === p.value
+                      ? "bg-white text-[#3B82F6] shadow-sm border border-[#E5E7EB]"
+                      : "text-gray-500 hover:text-gray-700"
+                  )}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setAutoPlay((v) => !v)}
+              title={autoPlay ? "Pausar rotação automática" : "Iniciar rotação automática"}
+              className={cn(
+                "p-1.5 rounded-lg border transition-colors",
+                autoPlay
+                  ? "bg-[#3B82F6] border-[#3B82F6] text-white"
+                  : "border-[#E5E7EB] bg-[#F8FAFC] text-gray-500 hover:text-gray-700"
+              )}
+            >
+              {autoPlay ? <Pause size={13} /> : <Play size={13} />}
+            </button>
           </div>
 
           {clockTime && (
@@ -124,6 +171,15 @@ function DashboardHeader() {
               </span>
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+            title="Sair"
+          >
+            <LogOut size={16} />
+          </button>
         </div>
       </header>
 

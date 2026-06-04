@@ -15,5 +15,5 @@ export async function GET() {
     timeZone: "America/Sao_Paulo",
   });
 
-  return NextResponse.json({ lastSync: time });
+  return NextResponse.json({ lastSync: time, lastSyncId: last.id });
 }

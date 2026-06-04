@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense, useMemo } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { Repeat, TrendingUp, WashingMachine, Store, Tag, Wind } from "lucide-react";
 import {
@@ -555,8 +555,7 @@ function UnitsTabContent({ from, to }: { from: string; to: string }) {
 // ── General tab ────────────────────────────────────────────────────────────
 
 interface GeneralKpisState {
-  fatHoje: number; ciclosHoje: number; ticketMedio: number;
-  ciclosMes: number; fatMes: number; fatAno: number;
+  fatHoje: number; ciclosHoje: number; ticketMedio: number; ciclosMes: number;
 }
 interface LastSaleItem {
   id: string; laundryName: string; machineLabel: string;
@@ -579,7 +578,14 @@ function SectionTitle({ label }: { label: string }) {
   );
 }
 
-function GeneralTabContent() {
+function periodLabel(p: ReturnType<typeof parsePeriod>): string {
+  if (p === "7d")  return "últimos 7 dias";
+  if (p === "30d") return "últimos 30 dias";
+  if (p === "90d") return "últimos 90 dias";
+  return "todo o período";
+}
+
+function GeneralTabContent({ from, to, period }: { from: string; to: string; period: ReturnType<typeof parsePeriod> }) {
   const [kpis, setKpis]                       = useState<GeneralKpisState | null>(null);
   const [dailyRevenue, setDailyRevenue]        = useState<DayPoint[]>([]);
   const [comparison, setComparison]            = useState<ComparisonData | null>(null);
@@ -588,8 +594,6 @@ function GeneralTabContent() {
   const [laundries, setLaundries]              = useState<LaundryWithStats[]>([]);
   const [lastSales, setLastSales]              = useState<LastSaleItem[]>([]);
   const [loading, setLoading]                  = useState(true);
-
-  const { from, to } = useMemo(() => getPeriodDates("7d"), []);
 
   useEffect(() => {
     const sp = new URLSearchParams({ from, to });
@@ -603,12 +607,10 @@ function GeneralTabContent() {
     ])
       .then(([kpisRes, salesRes, analyticsRes, cyclesRes, laundriesRes, lastSalesRes]) => {
         setKpis({
-          fatHoje:    kpisRes.kpis?.fatHoje?.value     ?? 0,
-          ciclosHoje: kpisRes.kpis?.ciclosHoje?.value  ?? 0,
+          fatHoje:     kpisRes.kpis?.fatHoje?.value     ?? 0,
+          ciclosHoje:  kpisRes.kpis?.ciclosHoje?.value  ?? 0,
           ticketMedio: kpisRes.kpis?.ticketMedio?.value ?? 0,
-          ciclosMes:  kpisRes.kpis?.ciclosMes?.value   ?? 0,
-          fatMes:     kpisRes.kpis?.fatMes?.value      ?? 0,
-          fatAno:     kpisRes.kpis?.fatAno?.value      ?? 0,
+          ciclosMes:   kpisRes.kpis?.ciclosMes?.value   ?? 0,
         });
         setDailyRevenue(salesRes.dailyEvolution ?? []);
         setComparison(analyticsRes.comparison ?? null);
@@ -630,9 +632,7 @@ function GeneralTabContent() {
   }
 
   const sortedLaundries = [...laundries].sort((a, b) => b.stats.totalPaidValue - a.stats.totalPaidValue);
-  const top8        = sortedLaundries.slice(0, 8);
-  const maxRevenue  = top8[0]?.stats.totalPaidValue ?? 1;
-  const donutData   = sortedLaundries.slice(0, 5).map((l) => ({ name: l.name, total: l.stats.totalPaidValue }));
+  const maxRevenue  = sortedLaundries[0]?.stats.totalPaidValue ?? 1;
   const top10Avg    = avgByUnit.slice(0, 10);
   const maxAvg      = Math.max(...top10Avg.map((u) => u.avgMachines), 1);
   const top10AvgDisplay = top10Avg.map((u) => ({
@@ -644,23 +644,21 @@ function GeneralTabContent() {
   return (
     <div className="pb-14">
       <p className="text-xs text-[#9CA3AF] mb-4">
-        Visão geral sempre exibe os últimos 7 dias. Use as abas específicas para outros períodos.
+        Exibindo dados dos {periodLabel(period)}.
       </p>
 
       {/* ── 1: KPI Cards ───────────────────────────────── */}
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <KpiCard icon={TrendingUp}     label="Faturamento hoje"   value={formatCurrency(kpis?.fatHoje    ?? 0)} />
-        <KpiCard icon={Repeat}         label="Ciclos hoje"        value={`${kpis?.ciclosHoje ?? 0}`} />
-        <KpiCard icon={Tag}            label="Ticket médio hoje"  value={formatCurrency(kpis?.ticketMedio ?? 0)} />
-        <KpiCard icon={WashingMachine} label="Ciclos do mês"      value={`${kpis?.ciclosMes  ?? 0}`} />
-        <KpiCard icon={Store}          label="Faturamento mensal" value={formatCurrency(kpis?.fatMes    ?? 0)} />
-        <KpiCard icon={Wind}           label="Faturamento anual"  value={formatCurrency(kpis?.fatAno    ?? 0)} />
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+        <KpiCard icon={TrendingUp}     label="Faturamento hoje"  value={formatCurrency(kpis?.fatHoje     ?? 0)} />
+        <KpiCard icon={Repeat}         label="Ciclos hoje"       value={`${kpis?.ciclosHoje ?? 0}`} />
+        <KpiCard icon={Tag}            label="Ticket médio hoje" value={formatCurrency(kpis?.ticketMedio ?? 0)} />
+        <KpiCard icon={WashingMachine} label="Ciclos do mês"     value={`${kpis?.ciclosMes  ?? 0}`} />
       </div>
 
       {/* ── 2: Faturamento ─────────────────────────────── */}
       <SectionTitle label="Faturamento" />
       <div className="grid gap-4 xl:grid-cols-2">
-        <SCard title="Evolução diária (últimos 7 dias)">
+        <SCard title={`Evolução diária (${periodLabel(period)})`}>
           <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={dailyRevenue} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -734,7 +732,7 @@ function GeneralTabContent() {
       {/* ── 3: Ciclos ──────────────────────────────────── */}
       <SectionTitle label="Ciclos" />
       <div className="grid gap-4 xl:grid-cols-2">
-        <SCard title="Evolução de ciclos (últimos 7 dias)">
+        <SCard title={`Evolução de ciclos (${periodLabel(period)})`}>
           <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={cyclesData?.byDay ?? []} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -779,7 +777,7 @@ function GeneralTabContent() {
       {/* ── 4: Máquinas ────────────────────────────────── */}
       <SectionTitle label="Máquinas" />
       <div className="grid gap-4 xl:grid-cols-2">
-        <SCard title="Distribuição por tipo">
+        <SCard title={`Distribuição por tipo (${periodLabel(period)})`}>
           <DistributionChart
             data={[
               { name: "Lavadoras", total: cyclesData?.byMachineType?.WASHER ?? 0 },
@@ -829,12 +827,12 @@ function GeneralTabContent() {
       {/* ── 5: Unidades ────────────────────────────────── */}
       <SectionTitle label="Unidades" />
       <div className="grid gap-4 xl:grid-cols-2">
-        <SCard title="Ranking de unidades (top 8 por faturamento)">
-          {top8.length === 0 ? (
+        <SCard title={`Ranking de unidades por faturamento (${periodLabel(period)})`}>
+          {sortedLaundries.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-4">Sem dados no período</p>
           ) : (
-            <div className="divide-y divide-[#E5E7EB]">
-              {top8.map((l) => {
+            <div className="divide-y divide-[#E5E7EB] overflow-y-auto max-h-[420px]">
+              {sortedLaundries.map((l) => {
                 const pct = maxRevenue > 0 ? Math.round((l.stats.totalPaidValue / maxRevenue) * 100) : 0;
                 return (
                   <div key={l.id} className="py-2 first:pt-0 last:pb-0">
@@ -855,11 +853,23 @@ function GeneralTabContent() {
           )}
         </SCard>
 
-        <SCard title="Distribuição de faturamento (top 5 unidades)">
-          {donutData.length === 0 ? (
+        <SCard title="Localização das unidades">
+          {sortedLaundries.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-4">Sem dados no período</p>
           ) : (
-            <DistributionChart data={donutData} />
+            <div className="divide-y divide-[#E5E7EB] overflow-y-auto max-h-[420px]">
+              {sortedLaundries.map((l, idx) => (
+                <div key={l.id} className="py-2 first:pt-0 last:pb-0 flex items-start gap-3">
+                  <span className="text-xs font-medium text-[#9CA3AF] w-5 shrink-0 text-right mt-0.5">{idx + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{l.name}</p>
+                    <p className="text-xs text-[#6B7280] mt-0.5 truncate">
+                      {[l.neighborhood, l.city, l.state].filter(Boolean).join(", ")}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </SCard>
       </div>
@@ -958,7 +968,7 @@ function DashboardContent() {
       </div>
 
       {/* Geral */}
-      {activeTab === "general" && <GeneralTabContent />}
+      {activeTab === "general" && <GeneralTabContent from={from} to={to} period={period} />}
 
       {/* Vendas */}
       {activeTab === "sales" && <SalesTabContent from={from} to={to} />}
