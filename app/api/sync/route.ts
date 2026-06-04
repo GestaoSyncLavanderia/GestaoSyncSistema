@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { syncAll } from "@/lib/sync";
 
-export const maxDuration = 3600;
+export const maxDuration = 300;
 
 export async function POST() {
   try {
