@@ -156,9 +156,14 @@ export async function syncSales(
 
     // Sales em paralelo
     await batch(validData, UPSERT_BATCH, async (s: any) => {
+      const machinesFromApi =
+        Array.isArray(s.machines) && s.machines.length > 0 ? s.machines : undefined;
       await db.sale.upsert({
         where: { id: s.id },
-        update: {},
+        update: {
+          // Atualiza machines apenas quando a API retornar valor não-vazio
+          ...(machinesFromApi !== undefined && { machines: machinesFromApi }),
+        },
         create: {
           id: s.id,
           laundryId,
