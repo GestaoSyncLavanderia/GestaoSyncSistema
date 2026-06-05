@@ -8,10 +8,10 @@ export async function GET(req: NextRequest) {
 
   const grouped = await db.cycle.groupBy({
     by: ["laundryId"],
-    _sum: { totalValue: true },
+    _sum: { totalPaidValue: true },
     _count: { id: true },
     where: { cycleDate: { gte } },
-    orderBy: { _sum: { totalValue: "desc" } },
+    orderBy: { _sum: { totalPaidValue: "desc" } },
   });
 
   const laundryIds = grouped.map((r) => r.laundryId);
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
     name: laundryMap[r.laundryId]?.name ?? r.laundryId,
     city: laundryMap[r.laundryId]?.city ?? "",
     state: laundryMap[r.laundryId]?.state ?? "",
-    total: r._sum.totalValue ?? 0,
+    total: r._sum.totalPaidValue ?? 0,
     cycles: r._count.id,
   }));
 

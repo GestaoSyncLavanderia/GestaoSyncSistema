@@ -19,7 +19,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }),
     db.cycle.aggregate({
       where: { customerId: id },
-      _sum: { totalValue: true },
+      _sum: { totalPaidValue: true },
       _count: { id: true },
     }),
     db.cycle.groupBy({
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     customer,
     cycles,
     summary: {
-      totalSpent: spentAgg._sum.totalValue ?? 0,
+      totalSpent: spentAgg._sum.totalPaidValue ?? 0,
       cyclesCount: spentAgg._count.id,
       lastVisit: lastCycle?.cycleDate ?? null,
       preferredPayment: prefPayment[0]?.paymentMethod ?? null,

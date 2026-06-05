@@ -33,8 +33,8 @@ async function queryDailyTotals(
     ? await db.$queryRaw`
         SELECT
           DATE_TRUNC('day', "cycleDate" AT TIME ZONE 'America/Sao_Paulo') AS day,
-          COALESCE(SUM("totalValue"), 0)::float AS total,
-          COUNT(*)                                  AS count
+          COALESCE(SUM("totalPaidValue"), 0)::float AS total,
+          COUNT(*)                                    AS count
         FROM "Cycle"
         WHERE "cycleDate" >= ${dateFrom} AND "cycleDate" <= ${dateTo}
           AND "laundryId" = ${laundryId}
@@ -43,7 +43,7 @@ async function queryDailyTotals(
     : await db.$queryRaw`
         SELECT
           DATE_TRUNC('day', "cycleDate" AT TIME ZONE 'America/Sao_Paulo') AS day,
-          COALESCE(SUM("totalValue"), 0)::float AS total,
+          COALESCE(SUM("totalPaidValue"), 0)::float AS total,
           COUNT(*)                                  AS count
         FROM "Cycle"
         WHERE "cycleDate" >= ${dateFrom} AND "cycleDate" <= ${dateTo}
@@ -63,8 +63,8 @@ export async function GET(req: NextRequest) {
   const from = searchParams.get("from");
   const to   = searchParams.get("to");
 
-  const dateFrom = from ? startOfDay(new Date(from)) : startOfDay(subDays(new Date(), 29));
-  const dateTo   = to   ? endOfDay(new Date(to))     : new Date();
+  const dateFrom = from ? new Date(from + "T00:00:00Z") : startOfDay(subDays(new Date(), 29));
+  const dateTo   = to   ? new Date(to + "T23:59:59.999Z") : new Date();
 
   // Período anterior: mesmo número de dias, imediatamente antes de dateFrom
   const days = differenceInDays(dateTo, dateFrom) + 1;
@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
     ? await db.$queryRaw`
         SELECT
           EXTRACT(DOW FROM "cycleDate" AT TIME ZONE 'America/Sao_Paulo')::int AS dow,
-          COALESCE(SUM("totalValue"), 0)::float AS total,
+          COALESCE(SUM("totalPaidValue"), 0)::float AS total,
           COUNT(*) AS count
         FROM "Cycle"
         WHERE "cycleDate" >= ${dateFrom} AND "cycleDate" <= ${dateTo}
@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
     : await db.$queryRaw`
         SELECT
           EXTRACT(DOW FROM "cycleDate" AT TIME ZONE 'America/Sao_Paulo')::int AS dow,
-          COALESCE(SUM("totalValue"), 0)::float AS total,
+          COALESCE(SUM("totalPaidValue"), 0)::float AS total,
           COUNT(*) AS count
         FROM "Cycle"
         WHERE "cycleDate" >= ${dateFrom} AND "cycleDate" <= ${dateTo}

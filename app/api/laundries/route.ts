@@ -7,14 +7,14 @@ export async function GET(req: NextRequest) {
   const fromParam = searchParams.get("from");
   const toParam = searchParams.get("to");
 
-  const gte = fromParam ? startOfDay(new Date(fromParam)) : startOfDay(subDays(new Date(), 29));
-  const lte = toParam ? endOfDay(new Date(toParam)) : new Date();
+  const gte = fromParam ? new Date(fromParam + "T00:00:00Z") : startOfDay(subDays(new Date(), 29));
+  const lte = toParam ? new Date(toParam + "T23:59:59.999Z") : new Date();
 
   const laundries = await db.laundry.findMany({ orderBy: { name: "asc" } });
 
   const cycleStats = await db.cycle.groupBy({
     by: ["laundryId"],
-    _sum: { totalValue: true },
+    _sum: { totalPaidValue: true },
     _count: { id: true },
     where: { cycleDate: { gte, lte } },
   });
@@ -23,10 +23,10 @@ export async function GET(req: NextRequest) {
     cycleStats.map((s) => [
       s.laundryId,
       {
-        totalPaidValue: s._sum.totalValue ?? 0,
+        totalPaidValue: s._sum.totalPaidValue ?? 0,
         cyclesCount: s._count.id,
         ticketMedio:
-          s._count.id > 0 ? (s._sum.totalValue ?? 0) / s._count.id : 0,
+          s._count.id > 0 ? (s._sum.totalPaidValue ?? 0) / s._count.id : 0,
       },
     ])
   );

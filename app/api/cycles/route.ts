@@ -9,8 +9,8 @@ export async function GET(req: NextRequest) {
   const fromParam = searchParams.get("from");
   const toParam   = searchParams.get("to");
 
-  const gte = fromParam ? startOfDay(new Date(fromParam)) : startOfDay(subDays(new Date(), 29));
-  const lte = toParam   ? endOfDay(new Date(toParam))     : new Date();
+  const gte = fromParam ? new Date(fromParam + "T00:00:00Z") : startOfDay(subDays(new Date(), 29));
+  const lte = toParam   ? new Date(toParam + "T23:59:59.999Z") : new Date();
   const where = { cycleDate: { gte, lte } };
 
   const days = Math.max(1, Math.round((lte.getTime() - gte.getTime()) / 86400000) + 1);

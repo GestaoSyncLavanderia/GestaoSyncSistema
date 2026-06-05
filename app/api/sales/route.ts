@@ -28,16 +28,16 @@ export async function GET(req: NextRequest) {
   if (paymentMethod) where.paymentMethod = paymentMethod;
   if (from || to) {
     where.cycleDate = {};
-    if (from) where.cycleDate.gte = startOfDay(new Date(from));
-    if (to)   where.cycleDate.lte = endOfDay(new Date(to));
+    if (from) where.cycleDate.gte = new Date(from + "T00:00:00Z");
+    if (to)   where.cycleDate.lte = new Date(to   + "T23:59:59.999Z");
   }
 
   const distribWhere: any = {};
   if (laundryId) distribWhere.laundryId = laundryId;
   if (from || to) {
     distribWhere.cycleDate = {};
-    if (from) distribWhere.cycleDate.gte = startOfDay(new Date(from));
-    if (to)   distribWhere.cycleDate.lte = endOfDay(new Date(to));
+    if (from) distribWhere.cycleDate.gte = new Date(from + "T00:00:00Z");
+    if (to)   distribWhere.cycleDate.lte = new Date(to   + "T23:59:59.999Z");
   }
 
   const [cycles, total, agg, avgMachines, paymentGroups, machineGroups] = await Promise.all([
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
     db.cycle.count({ where }),
     db.cycle.aggregate({
       where,
-      _sum: { totalValue: true },
+      _sum: { totalPaidValue: true },
       _count: { id: true },
     }),
     db.cycle.aggregate({
@@ -64,27 +64,27 @@ export async function GET(req: NextRequest) {
     db.cycle.groupBy({
       by: ["paymentMethod"],
       where: distribWhere,
-      _sum: { totalValue: true },
+      _sum: { totalPaidValue: true },
       _count: { id: true },
-      orderBy: { _sum: { totalValue: "desc" } },
+      orderBy: { _sum: { totalPaidValue: "desc" } },
     }),
     db.cycle.groupBy({
       by: ["machineType"],
       where: distribWhere,
-      _sum: { totalValue: true },
+      _sum: { totalPaidValue: true },
       _count: { id: true },
-      orderBy: { _sum: { totalValue: "desc" } },
+      orderBy: { _sum: { totalPaidValue: "desc" } },
     }),
   ]);
 
-  const dailyFrom = from ? startOfDay(new Date(from)) : subDays(new Date(), 29);
-  const dailyTo   = to   ? endOfDay(new Date(to))     : new Date();
+  const dailyFrom = from ? new Date(from + "T00:00:00Z") : subDays(new Date(), 29);
+  const dailyTo   = to   ? new Date(to + "T23:59:59.999Z") : new Date();
   const dailyWhere: any = { cycleDate: { gte: dailyFrom, lte: dailyTo } };
   if (laundryId) dailyWhere.laundryId = laundryId;
 
   const dailyRaw = await db.cycle.groupBy({
     by: ["cycleDate"],
-    _sum: { totalValue: true },
+    _sum: { totalPaidValue: true },
     _count: { id: true },
     where: dailyWhere,
     orderBy: { cycleDate: "asc" },
@@ -93,7 +93,7 @@ export async function GET(req: NextRequest) {
   const dailyMap = new Map(
     dailyRaw.map((d) => [
       format(d.cycleDate, "yyyy-MM-dd"),
-      { total: d._sum.totalValue ?? 0, cycles: d._count.id },
+      { total: d._sum.totalPaidValue ?? 0, cycles: d._count.id },
     ])
   );
 
@@ -107,11 +107,11 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  const totalDistrib = paymentGroups.reduce((s, g) => s + (g._sum.totalValue ?? 0), 0) || 1;
-  const totalMachine = machineGroups.reduce((s, g) => s + (g._sum.totalValue ?? 0), 0) || 1;
+  const totalDistrib = paymentGroups.reduce((s, g) => s + (g._sum.totalPaidValue ?? 0), 0) || 1;
+  const totalMachine = machineGroups.reduce((s, g) => s + (g._sum.totalPaidValue ?? 0), 0) || 1;
 
   const byPayment = paymentGroups.map((g) => {
-    const val = g._sum.totalValue ?? 0;
+    const val = g._sum.totalPaidValue ?? 0;
     return {
       method: g.paymentMethod,
       label:  PAYMENT_LABELS[g.paymentMethod] ?? g.paymentMethod,
@@ -122,7 +122,7 @@ export async function GET(req: NextRequest) {
   });
 
   const byMachineType = machineGroups.map((g) => {
-    const val = g._sum.totalValue ?? 0;
+    const val = g._sum.totalPaidValue ?? 0;
     return {
       type:  g.machineType,
       label: MACHINE_LABELS[g.machineType] ?? g.machineType,
@@ -133,7 +133,7 @@ export async function GET(req: NextRequest) {
   });
 
   const ticketMedio =
-    agg._count.id > 0 ? (agg._sum.totalValue ?? 0) / agg._count.id : 0;
+    agg._count.id > 0 ? (agg._sum.totalPaidValue ?? 0) / agg._count.id : 0;
 
   return NextResponse.json({
     cycles,
@@ -141,7 +141,7 @@ export async function GET(req: NextRequest) {
     page,
     limit,
     agg: {
-      totalPaidValue: agg._sum.totalValue ?? 0,
+      totalPaidValue: agg._sum.totalPaidValue ?? 0,
       count: agg._count.id,
       ticketMedio,
       avgMachines: avgMachines._avg.machinesCount ?? 0,
