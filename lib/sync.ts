@@ -2,6 +2,13 @@ import { db } from "./db";
 import * as api from "./sislav";
 import { startOfDay, subHours } from "date-fns";
 
+// Retorna o midnight UTC correspondente ao dia de Brasília (UTC-3) do timestamp
+export function brazilDayUTC(utcDate: Date): Date {
+  const ms = utcDate.getTime() - 3 * 60 * 60 * 1000;
+  const d  = new Date(ms);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
 const LAUNDRY_BATCH = 5;
 const CYCLE_BATCH   = 20;
 const UPSERT_BATCH  = 20;
@@ -209,7 +216,7 @@ export async function buildCyclesForLaundry(laundryId: string, since?: Date) {
 
   const groupMap = new Map<string, typeof sales>();
   for (const s of sales) {
-    const dayKey = startOfDay(s.date).toISOString();
+    const dayKey = brazilDayUTC(s.date).toISOString();
     const key = `${s.customerId}||${s.machineType}||${dayKey}`;
     if (!groupMap.has(key)) groupMap.set(key, []);
     groupMap.get(key)!.push(s);
@@ -217,7 +224,7 @@ export async function buildCyclesForLaundry(laundryId: string, since?: Date) {
 
   await batch([...groupMap.values()], CYCLE_BATCH, async (daySales) => {
     const { customerId, machineType } = daySales[0];
-    const cycleDate   = startOfDay(daySales[0].date);
+    const cycleDate   = brazilDayUTC(daySales[0].date);
     const allMachines = daySales.flatMap((s) => s.machines) as any;
 
     await db.cycle.upsert({
