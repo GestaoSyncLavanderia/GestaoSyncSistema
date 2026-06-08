@@ -15,7 +15,7 @@
 | Ribeirão do Lipa | R$ 106.815,40 | R$ 117.068,96 | R$ 106.803,39 | +R$ 12,01 | +0,01% |
 | Posto Muffato Philadelpho | R$ 25.713,31 | R$ 25.781,27 | R$ 25.781,27 | -R$ 67,96 | -0,26% |
 | Ipiranga do Norte | R$ 37.522,93 | R$ 37.522,93 | R$ 37.522,93 | R$ 0,00 | **0,00% ✓** |
-| Coxipã | R$ 130.643,31 | R$ 290.559,71 | R$ 130.632,63 | +R$ 10,68 | +0,01% |
+| Coxipã | R$ 130.643,31 | R$ 130.643,31 | R$ 130.632,63 | +R$ 10,68 | +0,01% |
 | Miguel Sutil | R$ 159.783,16 | R$ 159.963,06 | R$ 159.963,06 | -R$ 179,90 | -0,11% |
 | Paiaguás | R$ 112.556,43 | R$ 113.713,73 | R$ 112.586,41 | -R$ 29,98 | -0,03% |
 | Paranaíba | R$ 38.660,71 | R$ 38.660,71 | R$ 38.660,71 | R$ 0,00 | **0,00% ✓** |
@@ -52,9 +52,9 @@ Entradas financeiras manuais registradas no back-office do Sislav (ex: convênio
 
 | Unidade | Dash | Vendas | Diferença |
 |---|---:|---:|---:|
-| Coxipã | R$ 290.559,71 | R$ 130.632,63 | +R$ 159.927 (+122%) |
 | Alzira Santana | R$ 208.716,98 | R$ 187.027,17 | +R$ 21.689 (+11,6%) |
 | Ribeirão do Lipa | R$ 117.068,96 | R$ 106.803,39 | +R$ 10.265 (+9,6%) |
+| Chapéu do Sol | R$ 191.436,72 | R$ 180.207,50 | +R$ 11.229 (+6,2%) |
 
 ### 2. Cálculo de Balance
 Quando um cliente carrega créditos na conta, o dinheiro entra no caixa naquele momento. Quando usa esse saldo para pagar uma lavagem, o Dashboard contabiliza o valor da lavagem **mais uma vez** como receita, mesmo sem novo dinheiro entrar. Nosso sistema e a aba Vendas não duplicam esse valor — registram apenas o dinheiro recebido em cada transação.
