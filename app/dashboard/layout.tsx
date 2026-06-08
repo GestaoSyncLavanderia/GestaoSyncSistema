@@ -9,7 +9,16 @@ import { OdometerCounter } from "@/components/odometer-counter";
 import { LogOut, Play, Pause } from "lucide-react";
 
 const MONO = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-const CYCLE_ORDER: PeriodKey[] = ["7d", "30d", "90d", "ytd", "all"];
+const CYCLE_ORDER: PeriodKey[] = ["hoje", "semana", "mes", "mes-anterior", "total"];
+
+type TabKey = "general" | "sales" | "cycles" | "machines" | "units";
+const TABS_CONFIG: { key: TabKey; label: string }[] = [
+  { key: "general",  label: "Geral" },
+  { key: "sales",    label: "Vendas" },
+  { key: "cycles",   label: "Ciclos" },
+  { key: "machines", label: "Máquinas" },
+  { key: "units",    label: "Unidades" },
+];
 
 function DashboardHeader() {
   const pathname = usePathname();
@@ -91,9 +100,17 @@ function DashboardHeader() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPlay, period]);
 
+  const activeTab = (searchParams.get("tab") as TabKey) ?? "general";
+
   function handlePeriodChange(next: PeriodKey) {
     const params = new URLSearchParams(searchParams.toString());
     params.set("period", next);
+    router.push(`${pathname}?${params.toString()}`);
+  }
+
+  function handleTabChange(tab: TabKey) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", tab);
     router.push(`${pathname}?${params.toString()}`);
   }
 
@@ -183,11 +200,28 @@ function DashboardHeader() {
         </div>
       </header>
 
-      <div className="flex gap-4 px-6 pt-4 pb-4">
-        <OdometerCounter value={fatMensal} label="Faturamento Mensal" />
-        <OdometerCounter value={fatAnual} label="Faturamento Anual" />
+      <div className="flex gap-3 px-4 py-2 border-b border-[#E5E7EB]">
+        <OdometerCounter value={fatMensal} label="Faturamento Mensal" compact fullWidth />
+        <OdometerCounter value={fatAnual} label="Faturamento Anual" compact fullWidth />
       </div>
-      <div className="border-t border-[#E5E7EB]" />
+
+      <div className="flex items-center gap-1 px-4 py-1.5 border-b border-[#E5E7EB] bg-white">
+        {TABS_CONFIG.map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => handleTabChange(key)}
+            className={cn(
+              "px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
+              activeTab === key
+                ? "bg-[#3B82F6] text-white shadow-sm"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
     </>
   );
 }
@@ -206,7 +240,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       >
         <DashboardHeader />
       </Suspense>
-      <main className="p-6">{children}</main>
+      <main className="px-4 pt-2 pb-4">{children}</main>
     </div>
   );
 }

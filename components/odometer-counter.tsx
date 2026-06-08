@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react";
 
 const CELL_H = 52;
 const CELL_W = 34;
+const COMPACT_H = 48;
+const COMPACT_W = 32;
 
 // Always formats to 7 integer digits so character positions are stable
 // and digit box keys never shift (e.g. "R$ 0.000.000,00").
@@ -63,13 +65,18 @@ function DigitColumn({ digit, animate }: { digit: number; animate: boolean }) {
 interface OdometerCounterProps {
   value: number;
   label: string;
+  compact?: boolean;
+  fullWidth?: boolean;
 }
 
-export function OdometerCounter({ value, label }: OdometerCounterProps) {
+export function OdometerCounter({ value, label, compact = false, fullWidth = false }: OdometerCounterProps) {
   const prevRef = useRef<number | null>(null);
   const animate = prevRef.current !== null;
 
-  // Update after each render so next change triggers animation
+  const cellH = compact ? COMPACT_H : CELL_H;
+  const cellW = compact ? COMPACT_W : CELL_W;
+  const fontSize = compact ? 21 : 22;
+
   useEffect(() => {
     prevRef.current = value;
   });
@@ -80,20 +87,20 @@ export function OdometerCounter({ value, label }: OdometerCounterProps) {
     <div
       style={{
         background: "#1E3A5F",
-        borderRadius: 16,
-        padding: "24px 32px",
-        flex: 1,
+        borderRadius: compact ? 8 : 16,
+        padding: compact ? "10px 22px" : "24px 32px",
+        flex: (compact && !fullWidth) ? "0 0 auto" : 1,
         minWidth: 0,
       }}
     >
       <p
         style={{
           color: "#93C5FD",
-          fontSize: 11,
+          fontSize: compact ? 11 : 11,
           fontWeight: 600,
           letterSpacing: "0.1em",
           textTransform: "uppercase",
-          marginBottom: 16,
+          marginBottom: compact ? 8 : 16,
         }}
       >
         {label}
@@ -102,20 +109,58 @@ export function OdometerCounter({ value, label }: OdometerCounterProps) {
         {chars.map((char, i) => {
           if (/\d/.test(char)) {
             return (
-              <DigitColumn key={i} digit={parseInt(char, 10)} animate={animate} />
+              <div
+                key={i}
+                style={{
+                  width: cellW,
+                  height: cellH,
+                  overflow: "hidden",
+                  background: "#2D5A8E",
+                  border: "1px solid #3D6A9E",
+                  borderRadius: 6,
+                  flexShrink: 0,
+                }}
+              >
+                <div
+                  style={{
+                    willChange: "transform",
+                    transform: `translateY(-${parseInt(char, 10) * cellH}px)`,
+                    transition: animate ? "transform 600ms ease-out" : "none",
+                  }}
+                >
+                  {Array.from({ length: 10 }, (_, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        width: cellW,
+                        height: cellH,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#FFFFFF",
+                        fontSize,
+                        fontWeight: 700,
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {idx}
+                    </div>
+                  ))}
+                </div>
+              </div>
             );
           }
           if (char === " ") {
-            return <div key={i} style={{ width: 8, flexShrink: 0 }} />;
+            return <div key={i} style={{ width: compact ? 5 : 8, flexShrink: 0 }} />;
           }
           return (
             <span
               key={i}
               style={{
                 color: "#FFFFFF",
-                fontSize: 22,
+                fontSize,
                 fontWeight: 700,
-                lineHeight: `${CELL_H}px`,
+                lineHeight: `${cellH}px`,
                 display: "inline-flex",
                 alignItems: "center",
                 flexShrink: 0,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { startOfDay, endOfDay, subDays, eachDayOfInterval, format } from "date-fns";
+import { subDays } from "date-fns";
 
 const PAYMENT_LABELS: Record<string, string> = {
   PIX: "PIX",
@@ -90,22 +90,24 @@ export async function GET(req: NextRequest) {
     orderBy: { cycleDate: "asc" },
   });
 
+  // cycleDate é armazenado como UTC midnight do dia Brasil → toISOString é timezone-safe
   const dailyMap = new Map(
     dailyRaw.map((d) => [
-      format(d.cycleDate, "yyyy-MM-dd"),
+      d.cycleDate.toISOString().slice(0, 10),
       { total: d._sum.totalPaidValue ?? 0, cycles: d._count.id },
     ])
   );
 
-  const interval = eachDayOfInterval({ start: dailyFrom, end: dailyTo });
-  const dailyEvolution = interval.map((day) => {
-    const key = format(day, "yyyy-MM-dd");
-    return {
-      date: key,
-      total: dailyMap.get(key)?.total ?? 0,
-      cycles: dailyMap.get(key)?.cycles ?? 0,
-    };
-  });
+  const fromStr = dailyFrom.toISOString().slice(0, 10);
+  const toStr   = dailyTo.toISOString().slice(0, 10);
+  const cursor  = new Date(fromStr + "T00:00:00Z");
+  const stop    = new Date(toStr   + "T00:00:00Z");
+  const dailyEvolution: { date: string; total: number; cycles: number }[] = [];
+  while (cursor <= stop) {
+    const key = cursor.toISOString().slice(0, 10);
+    dailyEvolution.push({ date: key, total: dailyMap.get(key)?.total ?? 0, cycles: dailyMap.get(key)?.cycles ?? 0 });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
 
   const totalDistrib = paymentGroups.reduce((s, g) => s + (g._sum.totalPaidValue ?? 0), 0) || 1;
   const totalMachine = machineGroups.reduce((s, g) => s + (g._sum.totalPaidValue ?? 0), 0) || 1;

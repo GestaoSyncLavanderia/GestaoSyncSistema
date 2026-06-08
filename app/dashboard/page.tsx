@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
-import { useSearchParams, useRouter, usePathname } from "next/navigation";
-import { Repeat, TrendingUp, WashingMachine, Store, Tag, Wind } from "lucide-react";
+import React, { useEffect, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { Repeat, TrendingUp, WashingMachine, Store, Tag, Wind, Play, Pause } from "lucide-react";
 import {
-  AreaChart, Area, BarChart, Bar, LineChart, Line, Legend,
+  AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, Legend,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 import { KpiCard } from "@/components/kpi-card";
@@ -13,20 +13,11 @@ import { DistributionChart } from "@/components/distribution-chart";
 import { RevenueChart } from "@/components/revenue-chart";
 import { LaundryCard } from "@/components/laundry-card";
 import { formatCurrency } from "@/lib/format";
-import { cn } from "@/lib/utils";
 import { parsePeriod, getPeriodDates } from "@/lib/period";
 
 // ── Tab config ─────────────────────────────────────────────────────────────
 
 type TabKey = "general" | "sales" | "cycles" | "machines" | "units";
-
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "general",  label: "Geral" },
-  { key: "sales",    label: "Vendas" },
-  { key: "cycles",   label: "Ciclos" },
-  { key: "machines", label: "Máquinas" },
-  { key: "units",    label: "Unidades" },
-];
 
 // ── Shared types ───────────────────────────────────────────────────────────
 
@@ -563,6 +554,9 @@ interface LastSaleItem {
 }
 interface AvgByUnitItem { laundryId: string; name: string; avgMachines: number; }
 
+const PIE_COLORS = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#F97316", "#EC4899"];
+const MACHINE_COLORS = ["#3B82F6", "#F97316"];
+
 function SectionTitle({ label }: { label: string }) {
   return (
     <div
@@ -579,34 +573,88 @@ function SectionTitle({ label }: { label: string }) {
 }
 
 function periodLabel(p: ReturnType<typeof parsePeriod>): string {
-  if (p === "7d")  return "últimos 7 dias";
-  if (p === "30d") return "últimos 30 dias";
-  if (p === "90d") return "últimos 90 dias";
-  if (p === "ytd") return `ano de ${new Date().getFullYear()}`;
+  if (p === "hoje")         return "hoje";
+  if (p === "semana")       return "semana atual";
+  if (p === "mes")          return "mês atual";
+  if (p === "mes-anterior") return "mês anterior";
   return "todo o período";
 }
 
-function GeneralTabContent({ from, to, period }: { from: string; to: string; period: ReturnType<typeof parsePeriod> }) {
-  const [kpis, setKpis]                       = useState<GeneralKpisState | null>(null);
-  const [dailyRevenue, setDailyRevenue]        = useState<DayPoint[]>([]);
-  const [comparison, setComparison]            = useState<ComparisonData | null>(null);
-  const [cyclesData, setCyclesData]            = useState<CyclesData | null>(null);
-  const [avgByUnit, setAvgByUnit]              = useState<AvgByUnitItem[]>([]);
-  const [laundries, setLaundries]              = useState<LaundryWithStats[]>([]);
-  const [lastSales, setLastSales]              = useState<LastSaleItem[]>([]);
-  const [loading, setLoading]                  = useState(true);
+// ── Chart Carousel ────────────────────────────────────────────────────────
+
+interface CarouselSlide { title: string; node: React.ReactNode; }
+
+function ChartCarousel({ slides }: { slides: CarouselSlide[] }) {
+  const [idx, setIdx] = useState(0);
+  const [paused, setPaused] = useState(false);
 
   useEffect(() => {
+    if (paused || slides.length < 2) return;
+    const id = setInterval(() => setIdx((i) => (i + 1) % slides.length), 15000);
+    return () => clearInterval(id);
+  }, [paused, slides.length]);
+
+  if (!slides.length) return null;
+  const { title, node } = slides[idx];
+
+  return (
+    <SCard
+      title={title}
+      action={
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {slides.map((_, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setIdx(i)}
+                className="rounded-full transition-colors"
+                style={{ width: 6, height: 6, background: i === idx ? "#3B82F6" : "#D1D5DB" }}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setPaused((p) => !p)}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+            title={paused ? "Retomar" : "Pausar"}
+          >
+            {paused ? <Play size={12} /> : <Pause size={12} />}
+          </button>
+        </div>
+      }
+    >
+      {node}
+    </SCard>
+  );
+}
+
+// ── General Tab ───────────────────────────────────────────────────────────
+
+function GeneralTabContent({ from, to, period }: { from: string; to: string; period: ReturnType<typeof parsePeriod> }) {
+  const [kpis, setKpis]           = useState<GeneralKpisState | null>(null);
+  const [dailyRevenue, setDailyRevenue] = useState<DayPoint[]>([]);
+  const [comparison, setComparison]    = useState<ComparisonData | null>(null);
+  const [byPayment, setByPayment]      = useState<DistribEntry[]>([]);
+  const [byMachineType, setByMachineType] = useState<DistribEntry[]>([]);
+  const [avgMachinesByUnit, setAvgMachinesByUnit] = useState<AvgByUnitItem[]>([]);
+  const [weekdays, setWeekdays]        = useState<Array<{ label: string; total: number; count: number }>>([]);
+  const [laundries, setLaundries]      = useState<LaundryWithStats[]>([]);
+  const [lastSales, setLastSales]      = useState<LastSaleItem[]>([]);
+  const [loading, setLoading]          = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
     const sp = new URLSearchParams({ from, to });
     Promise.all([
       fetch("/api/kpis",                { cache: "no-store" }).then((r) => r.json()),
       fetch(`/api/sales?${sp}`,         { cache: "no-store" }).then((r) => r.json()),
       fetch(`/api/analytics?${sp}`,     { cache: "no-store" }).then((r) => r.json()),
-      fetch(`/api/cycles?${sp}`,        { cache: "no-store" }).then((r) => r.json()),
       fetch(`/api/laundries?${sp}`,     { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/last-sales?limit=20", { cache: "no-store" }).then((r) => r.json()),
+      fetch(`/api/cycles?${sp}`,        { cache: "no-store" }).then((r) => r.json()),
     ])
-      .then(([kpisRes, salesRes, analyticsRes, cyclesRes, laundriesRes, lastSalesRes]) => {
+      .then(([kpisRes, salesRes, analyticsRes, laundriesRes, lastSalesRes, cyclesRes]) => {
         setKpis({
           fatHoje:     kpisRes.kpis?.fatHoje?.value     ?? 0,
           ciclosHoje:  kpisRes.kpis?.ciclosHoje?.value  ?? 0,
@@ -614,9 +662,11 @@ function GeneralTabContent({ from, to, period }: { from: string; to: string; per
           ciclosMes:   kpisRes.kpis?.ciclosMes?.value   ?? 0,
         });
         setDailyRevenue(salesRes.dailyEvolution ?? []);
+        setByPayment(salesRes.byPayment ?? []);
+        setByMachineType(salesRes.byMachineType ?? []);
+        setAvgMachinesByUnit(cyclesRes.avgMachinesByUnit ?? []);
         setComparison(analyticsRes.comparison ?? null);
-        setCyclesData(cyclesRes);
-        setAvgByUnit(cyclesRes.avgMachinesByUnit ?? []);
+        setWeekdays(analyticsRes.weekdays ?? []);
         setLaundries(laundriesRes.laundries ?? []);
         setLastSales(lastSalesRes.sales ?? []);
       })
@@ -633,249 +683,229 @@ function GeneralTabContent({ from, to, period }: { from: string; to: string; per
   }
 
   const sortedLaundries = [...laundries].sort((a, b) => b.stats.totalPaidValue - a.stats.totalPaidValue);
-  const maxRevenue  = sortedLaundries[0]?.stats.totalPaidValue ?? 1;
-  const top10Avg    = avgByUnit.slice(0, 10);
-  const maxAvg      = Math.max(...top10Avg.map((u) => u.avgMachines), 1);
-  const top10AvgDisplay = top10Avg.map((u) => ({
-    ...u,
-    displayName: u.name.length > 22 ? u.name.slice(0, 20) + "…" : u.name,
-  }));
-  const avgChartHeight = Math.max(280, top10Avg.length * 44);
+  const maxRevenue = sortedLaundries[0]?.stats.totalPaidValue ?? 1;
 
   return (
-    <div className="pb-14">
-      <p className="text-xs text-[#9CA3AF] mb-4">
-        Exibindo dados dos {periodLabel(period)}.
-      </p>
-
-      {/* ── 1: KPI Cards ───────────────────────────────── */}
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+    <div className="flex flex-col gap-3 pb-12">
+      {/* ── KPI Cards */}
+      <div className="grid grid-cols-4 gap-2">
         <KpiCard icon={TrendingUp}     label="Faturamento hoje"  value={formatCurrency(kpis?.fatHoje     ?? 0)} />
         <KpiCard icon={Repeat}         label="Ciclos hoje"       value={`${kpis?.ciclosHoje ?? 0}`} />
         <KpiCard icon={Tag}            label="Ticket médio hoje" value={formatCurrency(kpis?.ticketMedio ?? 0)} />
         <KpiCard icon={WashingMachine} label="Ciclos do mês"     value={`${kpis?.ciclosMes  ?? 0}`} />
       </div>
 
-      {/* ── 2: Faturamento ─────────────────────────────── */}
-      <SectionTitle label="Faturamento" />
-      <div className="grid gap-4 xl:grid-cols-2">
-        <SCard title={`Evolução diária (${periodLabel(period)})`}>
+      {/* ── Linha 1: evolução | ranking | comparativo */}
+      <div className="grid grid-cols-3 gap-3">
+        <SCard title={`Faturamento — ${periodLabel(period)}`} compact>
           <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={dailyRevenue} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                 <defs>
-                  <linearGradient id="genRevGrad" x1="0" y1="0" x2="0" y2="1">
+                  <linearGradient id="tvRevGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%"  stopColor="#3B82F6" stopOpacity={0.15} />
                     <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-                <XAxis dataKey="date" tickFormatter={formatDateLabel} tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                <YAxis tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={52} />
+                <XAxis dataKey="date" tickFormatter={formatDateLabel} tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={46} />
                 <Tooltip
                   formatter={(value) => [formatCurrency(Number(value ?? 0)), "Faturamento"]}
                   labelFormatter={(label) => formatDateLabel(String(label ?? ""))}
                   contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
                 />
-                <Area type="monotone" dataKey="total" stroke="#3B82F6" strokeWidth={2} fill="url(#genRevGrad)" dot={false} />
+                <Area type="monotone" dataKey="total" stroke="#3B82F6" strokeWidth={2} fill="url(#tvRevGrad)" dot={false} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </SCard>
 
-        <SCard title="Comparativo de período">
-          {comparison ? (
-            <>
-              <div className="flex flex-wrap items-center gap-4 mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-[#3B82F6] shrink-0" />
-                  <span className="text-xs text-[#6B7280]">Atual ({comparison.currentLabel})</span>
-                  <span className="text-sm font-semibold text-[#111827]">{formatCurrency(comparison.currentTotal)}</span>
+        <SCard title="Ranking de unidades" compact>
+          <div className="divide-y divide-[#E5E7EB] overflow-hidden" style={{ maxHeight: 212 }}>
+            {sortedLaundries.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">Sem dados no período</p>
+            ) : sortedLaundries.map((l, i) => {
+              const pct = maxRevenue > 0 ? Math.round((l.stats.totalPaidValue / maxRevenue) * 100) : 0;
+              return (
+                <div key={l.id} className="py-1.5 first:pt-0 last:pb-0">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-xs font-bold text-[#9CA3AF] w-4 shrink-0">#{i + 1}</span>
+                      <span className="text-xs font-medium text-gray-900 truncate">{l.name.replace(/^Desce Lava\s*/i, "")}</span>
+                    </div>
+                    <span className="text-xs font-semibold text-[#10B981] ml-2 shrink-0">{formatCurrency(l.stats.totalPaidValue)}</span>
+                  </div>
+                  <div className="h-1 w-full rounded-full bg-[#F3F4F6]">
+                    <div className="h-full rounded-full bg-[#3B82F6] transition-all duration-500" style={{ width: `${pct}%` }} />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-[#D1D5DB] shrink-0" />
-                  <span className="text-xs text-[#6B7280]">Anterior ({comparison.previousLabel})</span>
-                  <span className="text-sm font-semibold text-[#111827]">{formatCurrency(comparison.previousTotal)}</span>
+              );
+            })}
+          </div>
+        </SCard>
+
+        <ChartCarousel slides={[
+          {
+            title: "Comparativo de período",
+            node: comparison ? (
+              <>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#3B82F6] shrink-0" />
+                    <span className="text-xs text-[#6B7280]">{comparison.currentLabel}</span>
+                    <span className="text-xs font-semibold text-[#111827]">{formatCurrency(comparison.currentTotal)}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#D1D5DB] shrink-0" />
+                    <span className="text-xs text-[#6B7280]">{comparison.previousLabel}</span>
+                    <span className="text-xs font-semibold text-[#111827]">{formatCurrency(comparison.previousTotal)}</span>
+                  </div>
+                  {comparison.changePct !== null && (
+                    <span className={`text-xs font-semibold ${comparison.changePct >= 0 ? "text-[#10B981]" : "text-red-500"}`}>
+                      {comparison.changePct >= 0 ? "+" : ""}{comparison.changePct}%
+                    </span>
+                  )}
                 </div>
-                {comparison.changePct !== null && (
-                  <span className={`text-sm font-semibold ${comparison.changePct >= 0 ? "text-[#10B981]" : "text-red-500"}`}>
-                    {comparison.changePct >= 0 ? "+" : ""}{comparison.changePct}% vs. anterior
-                  </span>
-                )}
-              </div>
-              <div className="h-48">
+                <div className="h-40">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={comparison.series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                      <YAxis tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={46} />
+                      <Tooltip
+                        formatter={(value, name) => [formatCurrency(Number(value ?? 0)), String(name) === "current" ? "Atual" : "Anterior"]}
+                        contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "11px" }}
+                      />
+                      <Line type="monotone" dataKey="current"  stroke="#3B82F6" strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="previous" stroke="#D1D5DB" strokeWidth={2} strokeDasharray="4 4" dot={false} activeDot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            ) : <p className="text-sm text-gray-400 text-center py-8">Sem dados</p>,
+          },
+          {
+            title: "Faturamento por pagamento",
+            node: byPayment.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">Sem dados</p>
+            ) : (
+              <div className="h-44">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={comparison.series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false} axisLine={false} />
-                    <YAxis tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={52} />
-                    <Tooltip
-                      formatter={(value, name) => [
-                        formatCurrency(Number(value ?? 0)),
-                        String(name) === "current"
-                          ? `Atual (${comparison.currentLabel})`
-                          : `Anterior (${comparison.previousLabel})`,
-                      ]}
-                      contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
-                    />
-                    <Line type="monotone" dataKey="current"  stroke="#3B82F6" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-                    <Line type="monotone" dataKey="previous" stroke="#D1D5DB" strokeWidth={2} strokeDasharray="4 4" dot={false} activeDot={{ r: 4 }} />
-                  </LineChart>
+                  <PieChart>
+                    <Pie data={byPayment} cx="38%" cy="50%" innerRadius={36} outerRadius={66} dataKey="total" nameKey="label">
+                      {byPayment.map((_, i) => (
+                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v: unknown) => [formatCurrency(Number(v ?? 0)), "Faturamento"]} />
+                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, lineHeight: "18px" }} layout="vertical" align="right" verticalAlign="middle" />
+                  </PieChart>
                 </ResponsiveContainer>
               </div>
-            </>
-          ) : (
-            <p className="text-sm text-gray-400 text-center py-4">Sem dados de comparativo</p>
-          )}
-        </SCard>
+            ),
+          },
+          {
+            title: "Lavadora vs Secadora",
+            node: byMachineType.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">Sem dados</p>
+            ) : (
+              <div className="h-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={byMachineType} cx="38%" cy="50%" innerRadius={36} outerRadius={66} dataKey="total" nameKey="label">
+                      {byMachineType.map((_, i) => (
+                        <Cell key={i} fill={MACHINE_COLORS[i % MACHINE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v: unknown) => [formatCurrency(Number(v ?? 0)), "Faturamento"]} />
+                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, lineHeight: "18px" }} layout="vertical" align="right" verticalAlign="middle" />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ),
+          },
+          {
+            title: "Faturamento por dia da semana",
+            node: (
+              <div className="h-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={weekdays} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} />
+                    <YAxis tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={46} />
+                    <Tooltip
+                      formatter={(value) => [formatCurrency(Number(value ?? 0)), "Faturamento"]}
+                      contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "11px" }}
+                    />
+                    <Bar dataKey="total" fill="#10B981" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ),
+          },
+        ]} />
       </div>
 
-      {/* ── 3: Ciclos ──────────────────────────────────── */}
-      <SectionTitle label="Ciclos" />
-      <div className="grid gap-4 xl:grid-cols-2">
-        <SCard title={`Evolução de ciclos (${periodLabel(period)})`}>
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={cyclesData?.byDay ?? []} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="genCyclesGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#10B981" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-                <XAxis dataKey="date" tickFormatter={formatDateLabel} tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={28} allowDecimals={false} />
-                <Tooltip
-                  formatter={(value) => [`${Number(value ?? 0)} ciclos`, "Ciclos"]}
-                  labelFormatter={(label) => formatDateLabel(String(label ?? ""))}
-                  contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
-                />
-                <Area type="monotone" dataKey="count" stroke="#10B981" strokeWidth={2} fill="url(#genCyclesGrad)" dot={false} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </SCard>
-
-        <SCard title="Ciclos por dia da semana">
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={cyclesData?.byDayOfWeek ?? []} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#9CA3AF" }} tickLine={false} axisLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false} axisLine={false} width={28} allowDecimals={false} />
-                <Tooltip
-                  formatter={(value) => [`${Number(value ?? 0)} ciclos`, "Ciclos"]}
-                  contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
-                />
-                <Bar dataKey="count" fill="#6366F1" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </SCard>
-      </div>
-
-      {/* ── 4: Máquinas ────────────────────────────────── */}
-      <SectionTitle label="Máquinas" />
-      <div className="grid gap-4 xl:grid-cols-2">
-        <SCard title={`Distribuição por tipo (${periodLabel(period)})`}>
-          <DistributionChart
-            data={[
-              { name: "Lavadoras", total: cyclesData?.byMachineType?.WASHER ?? 0 },
-              { name: "Secadoras", total: cyclesData?.byMachineType?.DRYER  ?? 0 },
-            ]}
-          />
-        </SCard>
-
-        <SCard title="Média de máquinas por ciclo (por unidade)">
-          {top10AvgDisplay.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-4">Sem dados no período</p>
+      {/* ── Linha 2: avg máquinas + localização */}
+      <div className="grid grid-cols-3 gap-3">
+        <SCard title="Média de máquinas por ciclo" compact className="col-span-2">
+          {avgMachinesByUnit.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4">Sem dados</p>
           ) : (
-            <div style={{ height: avgChartHeight }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={top10AvgDisplay} layout="vertical" margin={{ top: 4, right: 32, left: 8, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
-                  <XAxis
-                    type="number"
-                    domain={[0, Math.ceil(maxAvg + 0.5)]}
-                    tick={{ fontSize: 10, fill: "#9CA3AF" }}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="displayName"
-                    width={160}
-                    tick={{ fontSize: 10, fill: "#374151" }}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <Tooltip
-                    labelFormatter={(_label, payload) =>
-                      (payload?.[0]?.payload as AvgByUnitItem | undefined)?.name ?? String(_label)
-                    }
-                    formatter={(value) => [`${Number(value ?? 0).toFixed(1)} máq/ciclo`, "Média"]}
-                    contentStyle={{ borderRadius: "10px", border: "1px solid #E5E7EB", fontSize: "12px" }}
-                  />
-                  <Bar dataKey="avgMachines" fill="#F97316" radius={[0, 3, 3, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </SCard>
-      </div>
-
-      {/* ── 5: Unidades ────────────────────────────────── */}
-      <SectionTitle label="Unidades" />
-      <div className="grid gap-4 xl:grid-cols-2">
-        <SCard title={`Ranking de unidades por faturamento (${periodLabel(period)})`}>
-          {sortedLaundries.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-4">Sem dados no período</p>
-          ) : (
-            <div className="divide-y divide-[#E5E7EB] overflow-y-auto max-h-[420px]">
-              {sortedLaundries.map((l) => {
-                const pct = maxRevenue > 0 ? Math.round((l.stats.totalPaidValue / maxRevenue) * 100) : 0;
-                return (
-                  <div key={l.id} className="py-2 first:pt-0 last:pb-0">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-sm font-medium text-gray-900 truncate flex-1">{l.name}</span>
-                      <div className="flex items-center gap-3 ml-3 shrink-0">
-                        <span className="text-xs text-[#6B7280]">{l.stats.cyclesCount} ciclos</span>
-                        <span className="text-sm font-semibold text-[#10B981]">{formatCurrency(l.stats.totalPaidValue)}</span>
-                      </div>
-                    </div>
-                    <div className="h-1.5 w-full rounded-full bg-[#F3F4F6]">
-                      <div className="h-full rounded-full transition-all duration-500 bg-[#3B82F6]" style={{ width: `${pct}%` }} />
-                    </div>
+            <div className="flex gap-2 h-44">
+              <div className="w-[38%] shrink-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={avgMachinesByUnit.slice(0, 12)}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={38}
+                      outerRadius={68}
+                      dataKey="avgMachines"
+                      nameKey="name"
+                    >
+                      {avgMachinesByUnit.slice(0, 12).map((_, i) => (
+                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v: unknown) => [`${Number(v ?? 0).toFixed(1)} máq/ciclo`, "Média"]} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex-1 grid grid-cols-2 content-center gap-x-4 gap-y-1 overflow-hidden py-1">
+                {avgMachinesByUnit.slice(0, 12).map((item, i) => (
+                  <div key={i} className="flex items-center gap-1.5 min-w-0">
+                    <span className="shrink-0 w-2 h-2 rounded-full" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
+                    <span className="text-[10px] text-gray-700 truncate leading-tight">
+                      {item.name.replace(/^Desce Lava\s*/i, "")}
+                    </span>
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </div>
           )}
         </SCard>
 
-        <SCard title="Localização das unidades">
-          {sortedLaundries.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-4">Sem dados no período</p>
-          ) : (
-            <div className="divide-y divide-[#E5E7EB] overflow-y-auto max-h-[420px]">
-              {sortedLaundries.map((l, idx) => (
-                <div key={l.id} className="py-2 first:pt-0 last:pb-0 flex items-start gap-3">
-                  <span className="text-xs font-medium text-[#9CA3AF] w-5 shrink-0 text-right mt-0.5">{idx + 1}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{l.name}</p>
-                    <p className="text-xs text-[#6B7280] mt-0.5 truncate">
-                      {[l.neighborhood, l.city, l.state].filter(Boolean).join(", ")}
-                    </p>
-                  </div>
+        <SCard title="Localização das unidades" compact>
+          <div className="overflow-y-auto" style={{ maxHeight: 196 }}>
+            {[...laundries].sort((a, b) => b.stats.totalPaidValue - a.stats.totalPaidValue).map((l, i) => (
+              <div key={l.id} className="flex items-center gap-2.5 py-1.5 border-b border-[#F3F4F6] last:border-0 first:pt-0">
+                <span className="text-[10px] font-bold text-gray-300 w-4 shrink-0 text-right">{i + 1}</span>
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-gray-800 truncate">{l.name}</p>
+                  <p className="text-[10px] text-gray-400 truncate">
+                    {[l.neighborhood, l.city, l.state].filter(Boolean).join(", ")}
+                  </p>
                 </div>
-              ))}
-            </div>
-          )}
+              </div>
+            ))}
+          </div>
         </SCard>
       </div>
 
-      {/* ── 6: Ticker ──────────────────────────────────── */}
+      {/* ── Ticker */}
       {lastSales.length > 0 && (
         <>
           <style>{`
@@ -894,30 +924,15 @@ function GeneralTabContent({ from, to, period }: { from: string; to: string; per
             className="fixed bottom-0 left-0 right-0 overflow-hidden z-40"
             style={{ background: "#1E3A5F", display: "flex", alignItems: "center" }}
           >
-            {/* Prefixo fixo */}
-            <div
-              style={{
-                flexShrink: 0,
-                padding: "10px 20px",
-                borderRight: "1px solid rgba(255,255,255,0.12)",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <span style={{ fontSize: 12, fontWeight: 600, color: "#CBD5E1", whiteSpace: "nowrap" }}>
-                Dados da última sincronização:
-              </span>
+            <div style={{ flexShrink: 0, padding: "10px 20px", borderRight: "1px solid rgba(255,255,255,0.12)", display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#CBD5E1", whiteSpace: "nowrap" }}>Dados da última sincronização:</span>
               <span style={{ color: "#3B82F6", fontSize: 14, fontWeight: 700 }}>→</span>
             </div>
-            {/* Conteúdo rolante */}
             <div style={{ flex: 1, overflow: "hidden", padding: "10px 0" }}>
               <div className="ticker-track">
                 {[...lastSales, ...lastSales].map((s, i) => (
                   <span key={`${s.id}-${i}`} style={{ fontSize: 13, fontWeight: 500, color: "#E2E8F0" }}>
-                    <span style={{ paddingLeft: 32 }}>
-                      {s.laundryName} · {s.machineLabel} · {formatCurrency(s.paidValue)} · {s.paymentLabel}
-                    </span>
+                    <span style={{ paddingLeft: 32 }}>{s.laundryName} · {s.machineLabel} · {formatCurrency(s.paidValue)} · {s.paymentLabel}</span>
                     <span style={{ color: "#3B82F6", margin: "0 8px" }}>→</span>
                   </span>
                 ))}
@@ -934,39 +949,13 @@ function GeneralTabContent({ from, to, period }: { from: string; to: string; per
 
 function DashboardContent() {
   const searchParams = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
 
   const activeTab = (searchParams.get("tab") as TabKey) ?? "general";
   const period = parsePeriod(searchParams.get("period"));
   const { from, to } = getPeriodDates(period);
 
-  function handleTabChange(tab: TabKey) {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("tab", tab);
-    router.push(`${pathname}?${params.toString()}`);
-  }
-
   return (
-    <div className="space-y-6">
-      {/* Tab navigation */}
-      <div className="flex gap-1 bg-white border border-[#E5E7EB] rounded-[14px] p-1 w-fit">
-        {TABS.map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => handleTabChange(key)}
-            className={cn(
-              "px-4 py-2 text-sm font-medium rounded-[10px] transition-colors",
-              activeTab === key
-                ? "bg-[#3B82F6] text-white shadow-sm"
-                : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+    <div className="space-y-2">
 
       {/* Geral */}
       {activeTab === "general" && <GeneralTabContent from={from} to={to} period={period} />}
