@@ -1,34 +1,41 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import {
-  startOfDay,
-  startOfMonth,
-  startOfYear,
-  subDays,
-  subMonths,
-  subYears,
-  endOfDay,
-  getDate,
-} from "date-fns";
 
 function pct(current: number, previous: number): number | null {
   if (previous === 0) return null;
   return Math.round(((current - previous) / previous) * 100);
 }
 
-export async function GET() {
+// Converte "agora" para componentes de data no fuso Brasil (UTC-3),
+// igual ao brazilDayUTC de lib/sync.ts — garante consistência independente do fuso do servidor.
+function brazilDateComponents() {
   const now = new Date();
-  const todayStart = startOfDay(now);
-  const todayEnd = endOfDay(now);
-  const yesterdayStart = startOfDay(subDays(now, 1));
-  const yesterdayEnd = endOfDay(subDays(now, 1));
-  const monthStart = startOfMonth(now);
-  const prevMonthStart = startOfMonth(subMonths(now, 1));
-  const prevMonthEnd = endOfDay(subDays(monthStart, 1));
-  const yearStart = startOfYear(now);
-  const prevYearStart = startOfYear(subYears(now, 1));
-  const prevYearEnd = endOfDay(subDays(yearStart, 1));
-  const daysElapsed = getDate(now);
+  const ms = now.getTime() - 3 * 60 * 60 * 1000;
+  const d = new Date(ms);
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth(), day: d.getUTCDate() };
+}
+
+function utcMidnight(year: number, month: number, day: number) {
+  return new Date(Date.UTC(year, month, day));
+}
+function utcEndOfDay(year: number, month: number, day: number) {
+  return new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
+}
+
+export async function GET() {
+  const { year, month, day } = brazilDateComponents();
+
+  const todayStart     = utcMidnight(year, month, day);
+  const todayEnd       = utcEndOfDay(year, month, day);
+  const yesterdayStart = utcMidnight(year, month, day - 1);
+  const yesterdayEnd   = utcEndOfDay(year, month, day - 1);
+  const monthStart     = utcMidnight(year, month, 1);
+  const prevMonthStart = utcMidnight(year, month - 1, 1);
+  const prevMonthEnd   = utcEndOfDay(year, month, 0); // dia 0 = último dia do mês anterior
+  const yearStart      = utcMidnight(year, 0, 1);
+  const prevYearStart  = utcMidnight(year - 1, 0, 1);
+  const prevYearEnd    = utcEndOfDay(year - 1, 11, 31);
+  const daysElapsed    = day;
 
   const [
     fatHoje, fatOntem,

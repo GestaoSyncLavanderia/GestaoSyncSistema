@@ -582,6 +582,7 @@ function periodLabel(p: ReturnType<typeof parsePeriod>): string {
   if (p === "7d")  return "últimos 7 dias";
   if (p === "30d") return "últimos 30 dias";
   if (p === "90d") return "últimos 90 dias";
+  if (p === "ytd") return `ano de ${new Date().getFullYear()}`;
   return "todo o período";
 }
 

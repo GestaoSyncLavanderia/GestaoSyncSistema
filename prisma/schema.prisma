@@ -17,11 +17,12 @@ model Laundry {
   neighborhood  String
   googleMapsURL String?
   organizationId String
-  ownerName     String
-  ownerEmail    String
-  ownerMobile   String
-  createdAt     DateTime
-  syncedAt      DateTime @default(now())
+  ownerName      String
+  ownerEmail     String
+  ownerMobile    String
+  revenueMetric  String   @default("paidValue")
+  createdAt      DateTime
+  syncedAt       DateTime @default(now())
 
   sales     Sale[]
   cycles    Cycle[]

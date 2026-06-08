@@ -9,7 +9,7 @@ import { OdometerCounter } from "@/components/odometer-counter";
 import { LogOut, Play, Pause } from "lucide-react";
 
 const MONO = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-const CYCLE_ORDER: PeriodKey[] = ["7d", "30d", "90d", "all"];
+const CYCLE_ORDER: PeriodKey[] = ["7d", "30d", "90d", "ytd", "all"];
 
 function DashboardHeader() {
   const pathname = usePathname();

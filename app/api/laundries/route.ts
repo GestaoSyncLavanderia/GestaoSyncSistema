@@ -14,27 +14,31 @@ export async function GET(req: NextRequest) {
 
   const cycleStats = await db.cycle.groupBy({
     by: ["laundryId"],
-    _sum: { totalPaidValue: true },
+    _sum: { totalPaidValue: true, totalValue: true },
     _count: { id: true },
     where: { cycleDate: { gte, lte } },
   });
 
-  const statsMap = Object.fromEntries(
-    cycleStats.map((s) => [
-      s.laundryId,
-      {
-        totalPaidValue: s._sum.totalPaidValue ?? 0,
-        cyclesCount: s._count.id,
-        ticketMedio:
-          s._count.id > 0 ? (s._sum.totalPaidValue ?? 0) / s._count.id : 0,
-      },
-    ])
+  const rawMap = Object.fromEntries(
+    cycleStats.map((s) => [s.laundryId, s])
   );
 
-  const result = laundries.map((l) => ({
-    ...l,
-    stats: statsMap[l.id] ?? { totalPaidValue: 0, cyclesCount: 0, ticketMedio: 0 },
-  }));
+  const result = laundries.map((l) => {
+    const s = rawMap[l.id];
+    const useTotal = l.revenueMetric === "totalValue";
+    const revenue = useTotal
+      ? (s?._sum.totalValue ?? 0)
+      : (s?._sum.totalPaidValue ?? 0);
+    const count = s?._count.id ?? 0;
+    return {
+      ...l,
+      stats: {
+        totalPaidValue: revenue,
+        cyclesCount: count,
+        ticketMedio: count > 0 ? revenue / count : 0,
+      },
+    };
+  });
 
   return NextResponse.json({ laundries: result });
 }
