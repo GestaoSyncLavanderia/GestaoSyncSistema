@@ -15,19 +15,19 @@ export async function GET(req: NextRequest) {
 
   const days = Math.max(1, Math.round((lte.getTime() - gte.getTime()) / 86400000) + 1);
 
-  const [totalCount, avgAgg, avgWasherAgg, avgDryerAgg, allCycles, unitGroups, laundries, avgByUnit] = await Promise.all([
-    db.cycle.count({ where }),
+  const [totalAgg, avgAgg, avgWasherAgg, avgDryerAgg, allCycles, unitGroups, laundries, avgByUnit] = await Promise.all([
+    db.cycle.aggregate({ _sum: { machinesCount: true }, where }),
     db.cycle.aggregate({ _avg: { machinesCount: true }, where }),
     db.cycle.aggregate({ _avg: { machinesCount: true }, where: { ...where, machineType: "WASHER" } }),
     db.cycle.aggregate({ _avg: { machinesCount: true }, where: { ...where, machineType: "DRYER"  } }),
     db.cycle.findMany({
       where,
-      select: { cycleDate: true, machineType: true, laundryId: true },
+      select: { cycleDate: true, machineType: true, laundryId: true, machinesCount: true },
     }),
     db.cycle.groupBy({
       by: ["laundryId", "machineType"],
       where,
-      _count: { id: true },
+      _sum: { machinesCount: true },
     }),
     db.laundry.findMany({ select: { id: true, name: true } }),
     db.cycle.groupBy({
@@ -46,9 +46,9 @@ export async function GET(req: NextRequest) {
     const dateStr = format(c.cycleDate, "yyyy-MM-dd");
     if (!dayMap.has(dateStr)) dayMap.set(dateStr, { count: 0, washer: 0, dryer: 0 });
     const d = dayMap.get(dateStr)!;
-    d.count++;
-    if (c.machineType === "WASHER") d.washer++; else d.dryer++;
-    dowCounts[getDay(c.cycleDate)]++;
+    d.count += c.machinesCount;
+    if (c.machineType === "WASHER") d.washer += c.machinesCount; else d.dryer += c.machinesCount;
+    dowCounts[getDay(c.cycleDate)] += c.machinesCount;
   }
 
   const byDay = Array.from(dayMap.entries())
@@ -67,8 +67,9 @@ export async function GET(req: NextRequest) {
   for (const g of unitGroups) {
     if (!unitMap.has(g.laundryId)) unitMap.set(g.laundryId, { count: 0, washer: 0, dryer: 0 });
     const u = unitMap.get(g.laundryId)!;
-    u.count += g._count.id;
-    if (g.machineType === "WASHER") u.washer += g._count.id; else u.dryer += g._count.id;
+    const sc = Number(g._sum.machinesCount ?? 0);
+    u.count += sc;
+    if (g.machineType === "WASHER") u.washer += sc; else u.dryer += sc;
   }
   const byUnit = Array.from(unitMap.entries())
     .map(([laundryId, v]) => ({ laundryId, name: laundryNameMap[laundryId] ?? laundryId, ...v }))
@@ -84,6 +85,8 @@ export async function GET(req: NextRequest) {
     name:        laundryNameMap[r.laundryId] ?? r.laundryId,
     avgMachines: Number((r._avg.machinesCount ?? 0).toFixed(2)),
   }));
+
+  const totalCount = Number(totalAgg._sum.machinesCount ?? 0);
 
   return NextResponse.json({
     total: totalCount,

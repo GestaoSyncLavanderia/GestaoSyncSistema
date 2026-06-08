@@ -39,20 +39,20 @@ export async function GET() {
 
   const [
     fatHoje, fatOntem,
-    ciclosHoje, ciclosOntem,
-    ticketHoje, ticketOntem,
+    machinesCountHojeAgg, machinesCountOntemAgg,
+    visitsHoje, visitsOntem,
     fatMes, fatMesAnterior,
     fatAno, fatAnoAnterior,
     avgMachinesHoje,
     rankingHoje,
-    ciclosMes,
+    machinesCountMesAgg,
   ] = await Promise.all([
     db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
     db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: yesterdayStart, lte: yesterdayEnd } } }),
-    db.cycle.count({ where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
-    db.cycle.count({ where: { cycleDate: { gte: yesterdayStart, lte: yesterdayEnd } } }),
-    db.cycle.aggregate({ _avg: { totalPaidValue: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
-    db.cycle.aggregate({ _avg: { totalPaidValue: true }, where: { cycleDate: { gte: yesterdayStart, lte: yesterdayEnd } } }),
+    db.cycle.aggregate({ _sum: { machinesCount: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
+    db.cycle.aggregate({ _sum: { machinesCount: true }, where: { cycleDate: { gte: yesterdayStart, lte: yesterdayEnd } } }),
+    db.$queryRaw<[{ visits: bigint }]>`SELECT COUNT(DISTINCT "customerId"::text || "cycleDate"::text) AS visits FROM "Cycle" WHERE "cycleDate" >= ${todayStart} AND "cycleDate" <= ${todayEnd}`,
+    db.$queryRaw<[{ visits: bigint }]>`SELECT COUNT(DISTINCT "customerId"::text || "cycleDate"::text) AS visits FROM "Cycle" WHERE "cycleDate" >= ${yesterdayStart} AND "cycleDate" <= ${yesterdayEnd}`,
     db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: monthStart } } }),
     db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: prevMonthStart, lte: prevMonthEnd } } }),
     db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: yearStart } } }),
@@ -60,13 +60,12 @@ export async function GET() {
     db.cycle.aggregate({ _avg: { machinesCount: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
     db.cycle.groupBy({
       by: ["laundryId"],
-      _sum: { totalPaidValue: true },
-      _count: { id: true },
+      _sum: { totalPaidValue: true, machinesCount: true },
       where: { cycleDate: { gte: todayStart } },
       orderBy: { _sum: { totalPaidValue: "desc" } },
       take: 5,
     }),
-    db.cycle.count({ where: { cycleDate: { gte: monthStart } } }),
+    db.cycle.aggregate({ _sum: { machinesCount: true }, where: { cycleDate: { gte: monthStart } } }),
   ]);
 
   const laundryIds = rankingHoje.map((r) => r.laundryId);
@@ -85,13 +84,16 @@ export async function GET() {
     city: laundryMap[r.laundryId]?.city ?? "",
     state: laundryMap[r.laundryId]?.state ?? "",
     total: r._sum.totalPaidValue ?? 0,
-    cycles: r._count.id,
+    cycles: Number(r._sum.machinesCount ?? 0),
   }));
 
   const fatHojeVal   = fatHoje._sum.totalPaidValue ?? 0;
   const fatOntemVal  = fatOntem._sum.totalPaidValue ?? 0;
-  const ticketVal    = ticketHoje._avg.totalPaidValue ?? 0;
-  const ticketAntVal = ticketOntem._avg.totalPaidValue ?? 0;
+  const ciclosHoje   = machinesCountHojeAgg._sum.machinesCount ?? 0;
+  const visitsHojeN  = Number(visitsHoje[0]?.visits ?? 0);
+  const visitsOntemN = Number(visitsOntem[0]?.visits ?? 0);
+  const ticketVal    = visitsHojeN  > 0 ? fatHojeVal  / visitsHojeN  : 0;
+  const ticketAntVal = visitsOntemN > 0 ? fatOntemVal / visitsOntemN : 0;
   const fatMesVal    = fatMes._sum.totalPaidValue ?? 0;
   const fatMesAntVal = fatMesAnterior._sum.totalPaidValue ?? 0;
   const fatAnoVal    = fatAno._sum.totalPaidValue ?? 0;
@@ -112,7 +114,7 @@ export async function GET() {
       fatMes:             { value: fatMesVal },
       mediaDiaria:        { value: mediaDiaria },
       fatAno:             { value: fatAnoVal },
-      ciclosMes:          { value: ciclosMes },
+      ciclosMes:          { value: machinesCountMesAgg._sum.machinesCount ?? 0 },
     },
     distribution,
   });

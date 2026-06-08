@@ -65,8 +65,7 @@ export async function GET(req: NextRequest) {
   // Ranking top 10 clientes por gasto no período selecionado
   const rankingGroups = await db.cycle.groupBy({
     by: ["customerId"],
-    _sum: { totalPaidValue: true },
-    _count: { id: true },
+    _sum: { totalPaidValue: true, machinesCount: true },
     where: periodWhere,
     orderBy: { _sum: { totalPaidValue: "desc" } },
     take: 10,
@@ -87,16 +86,15 @@ export async function GET(req: NextRequest) {
     customerId: r.customerId,
     name: nameMap[r.customerId] ?? r.customerId,
     totalSpent: r._sum.totalPaidValue ?? 0,
-    cycles: r._count.id,
+    cycles: Number(r._sum.machinesCount ?? 0),
   }));
 
   // Usuários de saldo — clientes que pagaram com BALANCE no período
   const balanceGroups = await db.cycle.groupBy({
     by: ["customerId"],
     where: { ...periodWhere, paymentMethod: "BALANCE" },
-    _sum: { totalPaidValue: true },
-    _count: { id: true },
-    orderBy: { _count: { id: "desc" } },
+    _sum: { totalPaidValue: true, machinesCount: true },
+    orderBy: { _sum: { machinesCount: "desc" } },
     take: 20,
   });
 
@@ -115,7 +113,7 @@ export async function GET(req: NextRequest) {
     name: balanceNameMap[r.customerId]?.name ?? r.customerId,
     document: balanceNameMap[r.customerId]?.document ?? "",
     totalValue: r._sum.totalPaidValue ?? 0,
-    cycles: r._count.id,
+    cycles: Number(r._sum.machinesCount ?? 0),
   }));
 
   return NextResponse.json({

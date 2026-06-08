@@ -12,16 +12,22 @@ export async function GET(req: NextRequest) {
 
   const laundries = await db.laundry.findMany({ orderBy: { name: "asc" } });
 
-  const cycleStats = await db.cycle.groupBy({
-    by: ["laundryId"],
-    _sum: { totalPaidValue: true, totalValue: true },
-    _count: { id: true },
-    where: { cycleDate: { gte, lte } },
-  });
+  const [cycleStats, visitData] = await Promise.all([
+    db.cycle.groupBy({
+      by: ["laundryId"],
+      _sum: { totalPaidValue: true, totalValue: true, machinesCount: true },
+      where: { cycleDate: { gte, lte } },
+    }),
+    db.$queryRaw<Array<{ laundryId: string; visits: bigint }>>`
+      SELECT "laundryId", COUNT(DISTINCT "customerId"::text || "cycleDate"::text) AS visits
+      FROM "Cycle"
+      WHERE "cycleDate" >= ${gte} AND "cycleDate" <= ${lte}
+      GROUP BY "laundryId"
+    `,
+  ]);
 
-  const rawMap = Object.fromEntries(
-    cycleStats.map((s) => [s.laundryId, s])
-  );
+  const rawMap = Object.fromEntries(cycleStats.map((s) => [s.laundryId, s]));
+  const visitMap = Object.fromEntries(visitData.map((v) => [v.laundryId, Number(v.visits)]));
 
   const result = laundries.map((l) => {
     const s = rawMap[l.id];
@@ -29,13 +35,14 @@ export async function GET(req: NextRequest) {
     const revenue = useTotal
       ? (s?._sum.totalValue ?? 0)
       : (s?._sum.totalPaidValue ?? 0);
-    const count = s?._count.id ?? 0;
+    const machinesCount = Number(s?._sum.machinesCount ?? 0);
+    const visits = visitMap[l.id] ?? 0;
     return {
       ...l,
       stats: {
         totalPaidValue: revenue,
-        cyclesCount: count,
-        ticketMedio: count > 0 ? revenue / count : 0,
+        cyclesCount: machinesCount,
+        ticketMedio: visits > 0 ? revenue / visits : 0,
       },
     };
   });

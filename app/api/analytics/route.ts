@@ -34,7 +34,7 @@ async function queryDailyTotals(
         SELECT
           DATE_TRUNC('day', "cycleDate" AT TIME ZONE 'America/Sao_Paulo') AS day,
           COALESCE(SUM("totalPaidValue"), 0)::float AS total,
-          COUNT(*)                                    AS count
+          COALESCE(SUM("machinesCount"), 0)            AS count
         FROM "Cycle"
         WHERE "cycleDate" >= ${dateFrom} AND "cycleDate" <= ${dateTo}
           AND "laundryId" = ${laundryId}
@@ -44,7 +44,7 @@ async function queryDailyTotals(
         SELECT
           DATE_TRUNC('day', "cycleDate" AT TIME ZONE 'America/Sao_Paulo') AS day,
           COALESCE(SUM("totalPaidValue"), 0)::float AS total,
-          COUNT(*)                                  AS count
+          COALESCE(SUM("machinesCount"), 0)            AS count
         FROM "Cycle"
         WHERE "cycleDate" >= ${dateFrom} AND "cycleDate" <= ${dateTo}
         GROUP BY day
@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
         SELECT
           EXTRACT(DOW FROM "cycleDate" AT TIME ZONE 'America/Sao_Paulo')::int AS dow,
           COALESCE(SUM("totalPaidValue"), 0)::float AS total,
-          COUNT(*) AS count
+          COALESCE(SUM("machinesCount"), 0)            AS count
         FROM "Cycle"
         WHERE "cycleDate" >= ${dateFrom} AND "cycleDate" <= ${dateTo}
           AND "laundryId" = ${laundryId}
@@ -106,7 +106,7 @@ export async function GET(req: NextRequest) {
         SELECT
           EXTRACT(DOW FROM "cycleDate" AT TIME ZONE 'America/Sao_Paulo')::int AS dow,
           COALESCE(SUM("totalPaidValue"), 0)::float AS total,
-          COUNT(*) AS count
+          COALESCE(SUM("machinesCount"), 0)            AS count
         FROM "Cycle"
         WHERE "cycleDate" >= ${dateFrom} AND "cycleDate" <= ${dateTo}
         GROUP BY dow ORDER BY dow`;

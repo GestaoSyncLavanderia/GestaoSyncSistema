@@ -19,14 +19,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }),
     db.cycle.aggregate({
       where: { customerId: id },
-      _sum: { totalPaidValue: true },
-      _count: { id: true },
+      _sum: { totalPaidValue: true, machinesCount: true },
     }),
     db.cycle.groupBy({
       by: ["paymentMethod"],
       where: { customerId: id },
-      _count: { id: true },
-      orderBy: { _count: { id: "desc" } },
+      _sum: { machinesCount: true },
+      orderBy: { _sum: { machinesCount: "desc" } },
       take: 1,
     }),
   ]);
@@ -42,7 +41,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     cycles,
     summary: {
       totalSpent: spentAgg._sum.totalPaidValue ?? 0,
-      cyclesCount: spentAgg._count.id,
+      cyclesCount: Number(spentAgg._sum.machinesCount ?? 0),
       lastVisit: lastCycle?.cycleDate ?? null,
       preferredPayment: prefPayment[0]?.paymentMethod ?? null,
     },
