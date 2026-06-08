@@ -4,7 +4,7 @@ import { getSales } from "@/lib/sislav";
 import { buildCyclesForLaundry } from "@/lib/sync";
 import { startOfDay } from "date-fns";
 
-export const maxDuration = 3600;
+export const maxDuration = 300;
 
 function parseBirthDate(raw: string | null | undefined): Date | null {
   if (!raw) return null;
