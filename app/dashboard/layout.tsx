@@ -11,13 +11,14 @@ import { LogOut, Play, Pause } from "lucide-react";
 const MONO = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
 const CYCLE_ORDER: PeriodKey[] = ["hoje", "semana", "mes", "mes-anterior", "total"];
 
-type TabKey = "general" | "sales" | "cycles" | "machines" | "units";
+type TabKey = "general" | "sales" | "cycles" | "machines" | "units" | "duplicates";
 const TABS_CONFIG: { key: TabKey; label: string }[] = [
-  { key: "general",  label: "Geral" },
-  { key: "sales",    label: "Vendas" },
-  { key: "cycles",   label: "Ciclos" },
-  { key: "machines", label: "Máquinas" },
-  { key: "units",    label: "Unidades" },
+  { key: "general",    label: "Geral" },
+  { key: "sales",      label: "Vendas" },
+  { key: "cycles",     label: "Ciclos" },
+  { key: "machines",   label: "Máquinas" },
+  { key: "units",      label: "Unidades" },
+  { key: "duplicates", label: "Duplicatas" },
 ];
 
 function DashboardHeader() {

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { Repeat, TrendingUp, WashingMachine, Store, Tag, Wind, Play, Pause } from "lucide-react";
+import { Repeat, TrendingUp, WashingMachine, Store, Tag, Wind, Play, Pause, Copy, AlertTriangle, ChevronDown } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, Legend,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -17,7 +17,7 @@ import { parsePeriod, getPeriodDates } from "@/lib/period";
 
 // ── Tab config ─────────────────────────────────────────────────────────────
 
-type TabKey = "general" | "sales" | "cycles" | "machines" | "units";
+type TabKey = "general" | "sales" | "cycles" | "machines" | "units" | "duplicates";
 
 // ── Shared types ───────────────────────────────────────────────────────────
 
@@ -473,6 +473,156 @@ function MachinesTabContent({ from, to }: { from: string; to: string }) {
           )}
         </SCard>
       </div>
+    </div>
+  );
+}
+
+// ── Duplicates tab ────────────────────────────────────────────────────────
+
+const MACHINE_LABEL: Record<string, string> = { WASHER: "Lavadora", DRYER: "Secadora" };
+const PAYMENT_LABEL: Record<string, string> = {
+  PIX: "PIX", CREDIT: "Crédito", DEBIT: "Débito", MONEY: "Dinheiro", BALANCE: "Saldo",
+};
+
+interface DupDetail {
+  date: string; customerId: string; customerName: string;
+  machineType: string; paymentMethod: string;
+  totalValue: number; count: number; extraValue: number;
+}
+interface DupUnit {
+  laundryId: string; name: string;
+  dupGroups: number; extraSales: number; extraValue: number;
+  details: DupDetail[];
+}
+interface DupTotals { dupGroups: number; extraSales: number; extraValue: number; }
+
+function formatBrDateTime(iso: string) {
+  const d  = new Date(iso);
+  const br = new Date(d.getTime() - 3 * 60 * 60 * 1000);
+  const p  = (n: number) => String(n).padStart(2, "0");
+  return `${p(br.getUTCDate())}/${p(br.getUTCMonth() + 1)} ${p(br.getUTCHours())}:${p(br.getUTCMinutes())}`;
+}
+
+function DuplicatesTabContent({ from, to }: { from: string; to: string }) {
+  const [units,   setUnits]   = useState<DupUnit[]>([]);
+  const [totals,  setTotals]  = useState<DupTotals | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setLoading(true);
+    const p = new URLSearchParams({ from, to });
+    fetch(`/api/duplicate-sales?${p}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => { setUnits(d.units ?? []); setTotals(d.totals ?? null); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [from, to]);
+
+  function toggle(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  if (loading) {
+    return (
+      <div className="rounded-[14px] border border-[#E5E7EB] bg-white p-10 text-center text-sm text-gray-400">
+        Carregando...
+      </div>
+    );
+  }
+
+  if (units.length === 0) {
+    return (
+      <div className="rounded-[14px] border border-[#E5E7EB] bg-white p-10 text-center text-sm text-gray-400">
+        Nenhuma venda duplicada encontrada no período.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 lg:grid-cols-3">
+        <KpiCard icon={Copy}          label="Grupos duplicados"       value={`${totals?.dupGroups ?? 0}`}          sub="No período selecionado" />
+        <KpiCard icon={AlertTriangle} label="Vendas extras"           value={`${totals?.extraSales ?? 0}`}         sub="Acima do esperado" />
+        <KpiCard icon={TrendingUp}    label="Valor inflado no SisLav" value={formatCurrency(totals?.extraValue ?? 0)} sub="Diferença para o nosso sistema" />
+      </div>
+
+      <SCard title="Unidades com vendas duplicadas">
+        <div className="divide-y divide-[#E5E7EB]">
+          {units.map((unit) => (
+            <div key={unit.laundryId}>
+              <button
+                type="button"
+                className="w-full flex items-center justify-between py-3 text-left hover:bg-gray-50 transition-colors px-1 rounded-lg"
+                onClick={() => toggle(unit.laundryId)}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <ChevronDown
+                    size={14}
+                    className={`shrink-0 text-gray-400 transition-transform duration-200 ${expanded.has(unit.laundryId) ? "rotate-180" : ""}`}
+                  />
+                  <span className="text-sm font-medium text-gray-900 truncate">{unit.name}</span>
+                </div>
+                <div className="flex items-center gap-6 shrink-0 ml-4">
+                  <div className="text-right">
+                    <div className="text-[10px] text-gray-400 leading-none mb-0.5">Grupos dup.</div>
+                    <div className="text-sm font-semibold text-gray-700">{unit.dupGroups}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] text-gray-400 leading-none mb-0.5">Vendas extras</div>
+                    <div className="text-sm font-semibold text-gray-700">{unit.extraSales}</div>
+                  </div>
+                  <div className="text-right min-w-[90px]">
+                    <div className="text-[10px] text-gray-400 leading-none mb-0.5">Valor inflado</div>
+                    <div className="text-sm font-semibold text-red-500">{formatCurrency(unit.extraValue)}</div>
+                  </div>
+                </div>
+              </button>
+
+              {expanded.has(unit.laundryId) && (
+                <div className="pb-3 px-1">
+                  <div className="rounded-lg border border-[#E5E7EB] overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-[#F8FAFC] border-b border-[#E5E7EB]">
+                          <th className="text-left py-2 px-3 font-medium text-gray-500">Data/hora</th>
+                          <th className="text-left py-2 px-3 font-medium text-gray-500">Cliente</th>
+                          <th className="text-left py-2 px-3 font-medium text-gray-500">Máquina</th>
+                          <th className="text-left py-2 px-3 font-medium text-gray-500">Pagamento</th>
+                          <th className="text-right py-2 px-3 font-medium text-gray-500">Valor unit.</th>
+                          <th className="text-center py-2 px-3 font-medium text-gray-500">Reps.</th>
+                          <th className="text-right py-2 px-3 font-medium text-gray-500">Extra</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#F3F4F6]">
+                        {unit.details.map((d, i) => (
+                          <tr key={i} className="hover:bg-[#FAFAFA]">
+                            <td className="py-1.5 px-3 text-gray-600 tabular-nums">{formatBrDateTime(d.date)}</td>
+                            <td className="py-1.5 px-3 text-gray-800 font-medium max-w-[160px] truncate">{d.customerName}</td>
+                            <td className="py-1.5 px-3 text-gray-600">{MACHINE_LABEL[d.machineType] ?? d.machineType}</td>
+                            <td className="py-1.5 px-3 text-gray-600">{PAYMENT_LABEL[d.paymentMethod] ?? d.paymentMethod}</td>
+                            <td className="py-1.5 px-3 text-right text-gray-800 tabular-nums">{formatCurrency(d.totalValue)}</td>
+                            <td className="py-1.5 px-3 text-center">
+                              <span className="inline-flex items-center justify-center bg-amber-100 text-amber-700 rounded-full px-2 py-0.5 text-[10px] font-bold">
+                                {d.count}×
+                              </span>
+                            </td>
+                            <td className="py-1.5 px-3 text-right text-red-500 font-medium tabular-nums">{formatCurrency(d.extraValue)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </SCard>
     </div>
   );
 }
@@ -971,6 +1121,9 @@ function DashboardContent() {
 
       {/* Unidades */}
       {activeTab === "units" && <UnitsTabContent from={from} to={to} />}
+
+      {/* Duplicatas */}
+      {activeTab === "duplicates" && <DuplicatesTabContent from={from} to={to} />}
     </div>
   );
 }
