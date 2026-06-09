@@ -18,7 +18,7 @@ const TABS_CONFIG: { key: TabKey; label: string }[] = [
   { key: "cycles",     label: "Ciclos" },
   { key: "machines",   label: "Máquinas" },
   { key: "units",      label: "Unidades" },
-  { key: "duplicates", label: "Duplicatas" },
+  { key: "duplicates", label: "Vendas duplicadas" },
 ];
 
 function DashboardHeader() {
