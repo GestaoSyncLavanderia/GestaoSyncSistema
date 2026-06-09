@@ -222,10 +222,24 @@ export async function buildCyclesForLaundry(laundryId: string, since?: Date) {
     groupMap.get(key)!.push(s);
   }
 
-  await batch([...groupMap.values()], CYCLE_BATCH, async (daySales) => {
+  await batch([...groupMap.values()], CYCLE_BATCH, async (rawSales) => {
+    // Deduplica vendas com timestamp + valor + pagamento idênticos (bug de registro duplo no SisLav)
+    const seen = new Set<string>();
+    const daySales = rawSales.filter((s) => {
+      const key = `${s.date.getTime()}|${s.paidValue}|${s.paymentMethod}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
     const { customerId, machineType } = daySales[0];
     const cycleDate   = brazilDayUTC(daySales[0].date);
     const allMachines = daySales.flatMap((s) => s.machines) as any;
+    // Fallback: se machines[] vier vazio da API, conta 1 por venda (igual ao SisLav)
+    const machinesCount = daySales.reduce((sum, s) => {
+      const mc = (s.machines as any[]).length;
+      return sum + (mc > 0 ? mc : 1);
+    }, 0);
 
     await db.cycle.upsert({
       where: {
@@ -238,7 +252,7 @@ export async function buildCyclesForLaundry(laundryId: string, since?: Date) {
       },
       update: {
         machinesUsed:   allMachines,
-        machinesCount:  allMachines.length,
+        machinesCount,
         totalPaidValue: daySales.reduce((a, s) => a + s.paidValue, 0),
         totalValue:     daySales.reduce((a, s) => a + s.totalValue, 0),
         salesCount:     daySales.length,
@@ -250,7 +264,7 @@ export async function buildCyclesForLaundry(laundryId: string, since?: Date) {
         machineType,
         cycleDate,
         machinesUsed:   allMachines,
-        machinesCount:  allMachines.length,
+        machinesCount,
         totalPaidValue: daySales.reduce((a, s) => a + s.paidValue, 0),
         totalValue:     daySales.reduce((a, s) => a + s.totalValue, 0),
         salesCount:     daySales.length,

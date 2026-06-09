@@ -52,10 +52,24 @@ export async function POST() {
 
       // 4. Cria os ciclos em lotes
       let created = 0;
-      await batchRun([...groupMap.values()], CYCLE_BATCH, async (daySales) => {
+      await batchRun([...groupMap.values()], CYCLE_BATCH, async (rawSales) => {
+        // Deduplica vendas com timestamp + valor + pagamento idênticos (bug de registro duplo no SisLav)
+        const seen = new Set<string>();
+        const daySales = rawSales.filter((s) => {
+          const key = `${s.date.getTime()}|${s.paidValue}|${s.paymentMethod}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+
         const { customerId, machineType } = daySales[0];
         const cycleDate    = brazilDayUTC(daySales[0].date);
         const allMachines  = daySales.flatMap((s) => s.machines) as number[];
+        // Fallback: se machines[] vier vazio da API, conta 1 por venda (igual ao SisLav)
+        const machinesCount = daySales.reduce((sum, s) => {
+          const mc = (s.machines as number[]).length;
+          return sum + (mc > 0 ? mc : 1);
+        }, 0);
 
         await db.cycle.create({
           data: {
@@ -64,7 +78,7 @@ export async function POST() {
             machineType,
             cycleDate,
             machinesUsed:   allMachines,
-            machinesCount:  allMachines.length,
+            machinesCount,
             totalPaidValue: daySales.reduce((acc, s) => acc + s.paidValue, 0),
             totalValue:     daySales.reduce((acc, s) => acc + s.totalValue, 0),
             salesCount:     daySales.length,
