@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
-function pct(current: number, previous: number): number | null {
-  if (previous === 0) return null;
-  return Math.round(((current - previous) / previous) * 100);
-}
-
 // Converte "agora" para componentes de data no fuso Brasil (UTC-3),
 // igual ao brazilDayUTC de lib/sync.ts — garante consistência independente do fuso do servidor.
 function brazilDateComponents() {
@@ -22,6 +17,26 @@ function utcEndOfDay(year: number, month: number, day: number) {
   return new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
 }
 
+// Soma faturamento respeitando o revenueMetric de cada unidade — igual à rota /api/laundries.
+// CASE WHEN 'totalValue' → usa totalValue (inclui BALANCE)
+// CASE WHEN 'paidValue'  → usa totalPaidValue
+// default (totalValueNonBalance) → usa totalValue excluindo ciclos BALANCE
+async function revenueForPeriod(gte: Date, lte: Date): Promise<number> {
+  const rows = await db.$queryRaw<[{ rev: number }]>`
+    SELECT COALESCE(SUM(
+      CASE l."revenueMetric"
+        WHEN 'totalValue' THEN c."totalValue"
+        WHEN 'paidValue'  THEN c."totalPaidValue"
+        ELSE CASE WHEN c."paymentMethod" != 'BALANCE' THEN c."totalValue" ELSE 0 END
+      END
+    ), 0)::float8 AS rev
+    FROM "Cycle" c
+    JOIN "Laundry" l ON l.id = c."laundryId"
+    WHERE c."cycleDate" >= ${gte} AND c."cycleDate" <= ${lte}
+  `;
+  return rows[0]?.rev ?? 0;
+}
+
 export async function GET() {
   const { year, month, day } = brazilDateComponents();
 
@@ -30,46 +45,54 @@ export async function GET() {
   const yesterdayStart = utcMidnight(year, month, day - 1);
   const yesterdayEnd   = utcEndOfDay(year, month, day - 1);
   const monthStart     = utcMidnight(year, month, 1);
-  const prevMonthStart = utcMidnight(year, month - 1, 1);
-  const prevMonthEnd   = utcEndOfDay(year, month, 0); // dia 0 = último dia do mês anterior
+  const monthEnd       = utcEndOfDay(year, month + 1, 0); // último dia do mês atual
   const yearStart      = utcMidnight(year, 0, 1);
-  const prevYearStart  = utcMidnight(year - 1, 0, 1);
-  const prevYearEnd    = utcEndOfDay(year - 1, 11, 31);
+  const yearEnd        = utcEndOfDay(year, 11, 31);
   const daysElapsed    = day;
 
   const [
-    fatHoje, fatOntem,
-    machinesCountHojeAgg, machinesCountOntemAgg,
-    visitsHoje, visitsOntem,
-    fatMes, fatMesAnterior,
-    fatAno, fatAnoAnterior,
+    fatHojeVal,
+    fatMesVal,
+    fatAnoVal,
+    machinesCountHojeAgg,
+    visitsHoje,
     avgMachinesHoje,
     rankingHoje,
     machinesCountMesAgg,
   ] = await Promise.all([
-    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
-    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: yesterdayStart, lte: yesterdayEnd } } }),
+    revenueForPeriod(todayStart, todayEnd),
+    revenueForPeriod(monthStart, monthEnd),
+    revenueForPeriod(yearStart,  yearEnd),
     db.cycle.aggregate({ _sum: { machinesCount: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
-    db.cycle.aggregate({ _sum: { machinesCount: true }, where: { cycleDate: { gte: yesterdayStart, lte: yesterdayEnd } } }),
-    db.$queryRaw<[{ visits: bigint }]>`SELECT COUNT(DISTINCT "customerId"::text || "cycleDate"::text) AS visits FROM "Cycle" WHERE "cycleDate" >= ${todayStart} AND "cycleDate" <= ${todayEnd}`,
-    db.$queryRaw<[{ visits: bigint }]>`SELECT COUNT(DISTINCT "customerId"::text || "cycleDate"::text) AS visits FROM "Cycle" WHERE "cycleDate" >= ${yesterdayStart} AND "cycleDate" <= ${yesterdayEnd}`,
-    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: monthStart } } }),
-    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: prevMonthStart, lte: prevMonthEnd } } }),
-    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: yearStart } } }),
-    db.cycle.aggregate({ _sum: { totalPaidValue: true }, where: { cycleDate: { gte: prevYearStart, lte: prevYearEnd } } }),
+    db.$queryRaw<[{ visits: bigint }]>`
+      SELECT COUNT(DISTINCT "customerId"::text || "cycleDate"::text) AS visits
+      FROM "Cycle"
+      WHERE "cycleDate" >= ${todayStart} AND "cycleDate" <= ${todayEnd}
+    `,
     db.cycle.aggregate({ _avg: { machinesCount: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
-    db.cycle.groupBy({
-      by: ["laundryId"],
-      _sum: { totalPaidValue: true, machinesCount: true },
-      where: { cycleDate: { gte: todayStart } },
-      orderBy: { _sum: { totalPaidValue: "desc" } },
-      take: 5,
-    }),
-    db.cycle.aggregate({ _sum: { machinesCount: true }, where: { cycleDate: { gte: monthStart } } }),
+    db.$queryRaw<Array<{ laundryId: string; total: number; cycles: number }>>`
+      SELECT
+        c."laundryId",
+        COALESCE(SUM(
+          CASE l."revenueMetric"
+            WHEN 'totalValue' THEN c."totalValue"
+            WHEN 'paidValue'  THEN c."totalPaidValue"
+            ELSE CASE WHEN c."paymentMethod" != 'BALANCE' THEN c."totalValue" ELSE 0 END
+          END
+        ), 0)::float8 AS total,
+        SUM(c."machinesCount")::int AS cycles
+      FROM "Cycle" c
+      JOIN "Laundry" l ON l.id = c."laundryId"
+      WHERE c."cycleDate" >= ${todayStart} AND c."cycleDate" <= ${todayEnd}
+      GROUP BY c."laundryId"
+      ORDER BY total DESC
+      LIMIT 5
+    `,
+    db.cycle.aggregate({ _sum: { machinesCount: true }, where: { cycleDate: { gte: monthStart, lte: monthEnd } } }),
   ]);
 
   const laundryIds = rankingHoje.map((r) => r.laundryId);
-  const laundries =
+  const laundries  =
     laundryIds.length > 0
       ? await db.laundry.findMany({
           where: { id: { in: laundryIds } },
@@ -80,41 +103,29 @@ export async function GET() {
   const laundryMap = Object.fromEntries(laundries.map((l) => [l.id, l]));
   const distribution = rankingHoje.map((r) => ({
     laundryId: r.laundryId,
-    name: laundryMap[r.laundryId]?.name ?? r.laundryId,
-    city: laundryMap[r.laundryId]?.city ?? "",
+    name:  laundryMap[r.laundryId]?.name  ?? r.laundryId,
+    city:  laundryMap[r.laundryId]?.city  ?? "",
     state: laundryMap[r.laundryId]?.state ?? "",
-    total: r._sum.totalPaidValue ?? 0,
-    cycles: Number(r._sum.machinesCount ?? 0),
+    total:  r.total,
+    cycles: r.cycles,
   }));
 
-  const fatHojeVal   = fatHoje._sum.totalPaidValue ?? 0;
-  const fatOntemVal  = fatOntem._sum.totalPaidValue ?? 0;
-  const ciclosHoje   = machinesCountHojeAgg._sum.machinesCount ?? 0;
-  const visitsHojeN  = Number(visitsHoje[0]?.visits ?? 0);
-  const visitsOntemN = Number(visitsOntem[0]?.visits ?? 0);
-  const ticketVal    = visitsHojeN  > 0 ? fatHojeVal  / visitsHojeN  : 0;
-  const ticketAntVal = visitsOntemN > 0 ? fatOntemVal / visitsOntemN : 0;
-  const fatMesVal    = fatMes._sum.totalPaidValue ?? 0;
-  const fatMesAntVal = fatMesAnterior._sum.totalPaidValue ?? 0;
-  const fatAnoVal    = fatAno._sum.totalPaidValue ?? 0;
-  const fatAnoAntVal = fatAnoAnterior._sum.totalPaidValue ?? 0;
-  const mediaDiaria  = daysElapsed > 0 ? fatMesVal / daysElapsed : 0;
-
-  const diasMesAnt = new Date(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth() + 1, 0).getDate();
-  const mediaDiariaAnt = diasMesAnt > 0 ? fatMesAntVal / diasMesAnt : 0;
-
+  const ciclosHoje  = machinesCountHojeAgg._sum.machinesCount ?? 0;
+  const visitsHojeN = Number(visitsHoje[0]?.visits ?? 0);
+  const ticketVal   = visitsHojeN > 0 ? fatHojeVal / visitsHojeN : 0;
+  const mediaDiaria = daysElapsed > 0 ? fatMesVal / daysElapsed : 0;
   const avgMachinesPerCycle = avgMachinesHoje._avg.machinesCount ?? 0;
 
   return NextResponse.json({
     kpis: {
-      fatHoje:            { value: fatHojeVal },
-      ciclosHoje:         { value: ciclosHoje },
-      ticketMedio:        { value: ticketVal },
-      avgMachinesPerCycle:{ value: avgMachinesPerCycle },
-      fatMes:             { value: fatMesVal },
-      mediaDiaria:        { value: mediaDiaria },
-      fatAno:             { value: fatAnoVal },
-      ciclosMes:          { value: machinesCountMesAgg._sum.machinesCount ?? 0 },
+      fatHoje:             { value: fatHojeVal },
+      ciclosHoje:          { value: ciclosHoje },
+      ticketMedio:         { value: ticketVal },
+      avgMachinesPerCycle: { value: avgMachinesPerCycle },
+      fatMes:              { value: fatMesVal },
+      mediaDiaria:         { value: mediaDiaria },
+      fatAno:              { value: fatAnoVal },
+      ciclosMes:           { value: machinesCountMesAgg._sum.machinesCount ?? 0 },
     },
     distribution,
   });

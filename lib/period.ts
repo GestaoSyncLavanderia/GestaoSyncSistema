@@ -1,12 +1,13 @@
-import { format, startOfWeek, startOfMonth, endOfMonth, subMonths } from "date-fns";
+import { format, startOfWeek, startOfMonth, endOfMonth, startOfYear, subMonths } from "date-fns";
 
-export type PeriodKey = "hoje" | "semana" | "mes" | "mes-anterior" | "total";
+export type PeriodKey = "hoje" | "semana" | "mes" | "mes-anterior" | "ano" | "total";
 
 export const PERIODS: { label: string; value: PeriodKey }[] = [
   { label: "Hoje",         value: "hoje" },
   { label: "Semana",       value: "semana" },
   { label: "Mês atual",    value: "mes" },
   { label: "Mês anterior", value: "mes-anterior" },
+  { label: "Ano atual",    value: "ano" },
   { label: "Total",        value: "total" },
 ];
 
@@ -16,6 +17,7 @@ export function parsePeriod(value: string | null): PeriodKey {
     value === "semana" ||
     value === "mes" ||
     value === "mes-anterior" ||
+    value === "ano" ||
     value === "total"
   ) return value;
   return "mes";
@@ -41,6 +43,8 @@ export function getPeriodDates(period: PeriodKey = "mes"): { from: string; to: s
         to: format(endOfMonth(prev), "yyyy-MM-dd"),
       };
     }
+    case "ano":
+      return { from: format(startOfYear(now), "yyyy-MM-dd"), to: today };
     default:
       return { from: "2020-01-01", to: today };
   }
