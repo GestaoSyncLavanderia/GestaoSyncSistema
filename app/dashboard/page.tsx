@@ -1002,40 +1002,30 @@ function GeneralTabContent({ from, to, period }: { from: string; to: string; per
         <SCard title="Média de máquinas por ciclo" compact className="col-span-2">
           {avgMachinesByUnit.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-4">Sem dados</p>
-          ) : (
-            <div className="flex gap-2 h-44">
-              <div className="w-[38%] shrink-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={avgMachinesByUnit.slice(0, 12)}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={38}
-                      outerRadius={68}
-                      dataKey="avgMachines"
-                      nameKey="name"
-                    >
-                      {avgMachinesByUnit.slice(0, 12).map((_, i) => (
-                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v: unknown) => [`${Number(v ?? 0).toFixed(1)} máq/ciclo`, "Média"]} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex-1 grid grid-cols-2 content-center gap-x-4 gap-y-1 overflow-hidden py-1">
-                {avgMachinesByUnit.slice(0, 12).map((item, i) => (
-                  <div key={i} className="flex items-center gap-1.5 min-w-0">
-                    <span className="shrink-0 w-2 h-2 rounded-full" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
-                    <span className="text-[10px] text-gray-700 truncate leading-tight">
-                      {item.name.replace(/^Desce Lava\s*/i, "")}
+          ) : (() => {
+            const sorted = [...avgMachinesByUnit].sort((a, b) => b.avgMachines - a.avgMachines);
+            const max = sorted[0]?.avgMachines ?? 1;
+            return (
+              <div className="overflow-y-auto space-y-1.5" style={{ maxHeight: 176 }}>
+                {sorted.map((item) => (
+                  <div key={item.laundryId} className="flex items-center gap-2 min-w-0">
+                    <span className="text-[10px] text-gray-600 truncate w-32 shrink-0">
+                      {item.name.replace(/^Desce(?:\s+[Ee]?\s*)?Lava\s*/i, "")}
+                    </span>
+                    <div className="flex-1 bg-gray-100 rounded-full h-2 min-w-0">
+                      <div
+                        className="h-2 rounded-full bg-blue-500"
+                        style={{ width: `${(item.avgMachines / max) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] font-medium text-gray-700 w-8 text-right shrink-0">
+                      {item.avgMachines.toFixed(1)}
                     </span>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            );
+          })()}
         </SCard>
 
         <SCard title="Localização das unidades" compact>
