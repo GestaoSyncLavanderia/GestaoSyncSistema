@@ -119,16 +119,18 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  const byMachineType = machineGroups.map((g) => {
-    const val = g._sum.totalPaidValue ?? 0;
-    return {
-      type:  g.machineType,
-      label: MACHINE_LABELS[g.machineType] ?? g.machineType,
-      total: val,
-      count: Number(g._sum.machinesCount ?? 0),
-      pct:   Math.round((val / totalMachine) * 100),
-    };
-  });
+  const byMachineType = machineGroups
+    .filter((g) => g.machineType != null && MACHINE_LABELS[g.machineType] != null)
+    .map((g) => {
+      const val = g._sum.totalPaidValue ?? 0;
+      return {
+        type:  g.machineType,
+        label: MACHINE_LABELS[g.machineType!],
+        total: val,
+        count: Number(g._sum.machinesCount ?? 0),
+        pct:   Math.round((val / totalMachine) * 100),
+      };
+    });
 
   const totalSalesCount = Number(agg._sum.machinesCount ?? 0);
   const ticketMedio = totalSalesCount > 0 ? (agg._sum.totalPaidValue ?? 0) / totalSalesCount : 0;
