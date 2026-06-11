@@ -25,23 +25,30 @@ function rawGet<T>(urlStr: string, headers: Record<string, string>): Promise<T> 
     });
 
     const chunks: Buffer[] = [];
-    socket.on("data", (d: Buffer) => chunks.push(d));
-    socket.on("end", () => {
+    let done = false;
+
+    const finish = () => {
+      if (done) return;
+      done = true;
       const raw    = Buffer.concat(chunks);
       const sepIdx = raw.indexOf("\r\n\r\n");
-      if (sepIdx === -1) return reject(new Error("Resposta HTTP inválida do SisLav"));
+      if (sepIdx === -1)
+        return reject(new Error(`SisLav: sep não encontrado (${raw.length} bytes, hex: ${raw.slice(0, 30).toString("hex")})`));
 
       const headerText = raw.slice(0, sepIdx).toString("utf8");
       const body       = raw.slice(sepIdx + 4).toString("utf8");
 
-      // Detecta rate-limit via header (status code não é confiável)
       const rlMatch   = headerText.match(/X-RateLimit-Remaining:\s*(\d+)/i);
       const remaining = rlMatch ? parseInt(rlMatch[1]) : 99;
       if (remaining === 0) return reject(new Error("429 rate limited"));
 
       try   { resolve(JSON.parse(body)); }
-      catch { reject(new Error("SisLav JSON parse error")); }
-    });
+      catch { reject(new Error(`SisLav JSON parse error: ${body.slice(0, 80)}`)); }
+    };
+
+    socket.on("data",  (d: Buffer) => chunks.push(d));
+    socket.on("end",   finish);
+    socket.on("close", finish);
     socket.on("error", reject);
     socket.setTimeout(30_000, () => { socket.destroy(); reject(new Error("SisLav timeout")); });
   });
