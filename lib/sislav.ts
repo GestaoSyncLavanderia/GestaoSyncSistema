@@ -86,9 +86,9 @@ async function getAll<T>(path: string, orgId?: string, limit = 100, since?: Date
       }
     }
 
-    all = [...all, ...result!.data];
+    all = [...all, ...(result!.data ?? [])];
 
-    if (page >= result!.pagination.totalPages) break;
+    if (page >= (result!.pagination?.totalPages ?? 1)) break;
 
     if (since && result!.data.length > 0) {
       const last = (result!.data[result!.data.length - 1] as any)?.date;
