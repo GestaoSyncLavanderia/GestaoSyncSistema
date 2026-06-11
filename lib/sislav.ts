@@ -1,16 +1,24 @@
 import axios from "axios";
+import https from "https";
+import crypto from "crypto";
 
 const BASE    = process.env.SISLAV_API_URL!;
 const API_KEY = process.env.SISLAV_API_KEY!;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-// axios usa http.request internamente — suporta TLS renegotiation e é mais tolerante
-// a respostas HTTP não-padrão do que o fetch nativo (undici)
+// SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION permite que o servidor inicie
+// TLS renegotiation (comportamento do api.sislav.com.br) sem abortar a conexão
+const SSL_OP_LEGACY_RENEGOTIATION = 0x00000004;
+const httpsAgent = new https.Agent({
+  secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT | SSL_OP_LEGACY_RENEGOTIATION,
+  keepAlive: false,
+});
+
 async function get<T>(path: string, orgId?: string): Promise<T> {
   const headers: Record<string, string> = { "X-API-KEY": API_KEY };
   if (orgId) headers["X-ORG-ID"] = orgId;
-  const res = await axios.get<T>(`${BASE}${path}`, { headers });
+  const res = await axios.get<T>(`${BASE}${path}`, { headers, httpsAgent });
   return res.data;
 }
 
