@@ -1,34 +1,17 @@
-import https from "https";
+import axios from "axios";
 
 const BASE    = process.env.SISLAV_API_URL!;
 const API_KEY = process.env.SISLAV_API_KEY!;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-// Usa https.request (OpenSSL) em vez de fetch (undici) para suportar TLS renegotiation
-function get<T>(path: string, orgId?: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const url = new URL(`${BASE}${path}`);
-    const headers: Record<string, string> = { "X-API-KEY": API_KEY };
-    if (orgId) headers["X-ORG-ID"] = orgId;
-
-    const req = https.request(
-      { hostname: url.hostname, path: url.pathname + url.search, headers, method: "GET" },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on("data", (c: Buffer) => chunks.push(c));
-        res.on("end", () => {
-          if (res.statusCode && res.statusCode >= 400) {
-            return reject(new Error(`Sislav API error: ${res.statusCode} — ${path}`));
-          }
-          try { resolve(JSON.parse(Buffer.concat(chunks).toString())); }
-          catch { reject(new Error(`Sislav JSON parse error — ${path}`)); }
-        });
-      }
-    );
-    req.on("error", reject);
-    req.end();
-  });
+// axios usa http.request internamente — suporta TLS renegotiation e é mais tolerante
+// a respostas HTTP não-padrão do que o fetch nativo (undici)
+async function get<T>(path: string, orgId?: string): Promise<T> {
+  const headers: Record<string, string> = { "X-API-KEY": API_KEY };
+  if (orgId) headers["X-ORG-ID"] = orgId;
+  const res = await axios.get<T>(`${BASE}${path}`, { headers });
+  return res.data;
 }
 
 async function getAll<T>(path: string, orgId?: string, limit = 100, since?: Date): Promise<T[]> {
