@@ -1,5 +1,4 @@
-import axios from "axios";
-import https from "https";
+import tls from "tls";
 import crypto from "crypto";
 
 const BASE    = process.env.SISLAV_API_URL!;
@@ -7,19 +6,51 @@ const API_KEY = process.env.SISLAV_API_KEY!;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-// SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION permite que o servidor inicie
-// TLS renegotiation (comportamento do api.sislav.com.br) sem abortar a conexão
-const SSL_OP_LEGACY_RENEGOTIATION = 0x00000004;
-const httpsAgent = new https.Agent({
-  secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT | SSL_OP_LEGACY_RENEGOTIATION,
-  keepAlive: false,
-});
+// O servidor do SisLav envia bytes nulos no lugar do status code HTTP ("HTTP/1.1 \x00\x00\x00…"),
+// o que quebra todos os parsers HTTP padrão (undici, http.request, axios).
+// A solução é TLS raw: conecta direto, lê os bytes, extrai o body após \r\n\r\n.
+const TLS_OPTS = {
+  rejectUnauthorized: false,
+  secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT | 0x00040000,
+  minVersion: "TLSv1" as const,
+};
+
+function rawGet<T>(urlStr: string, headers: Record<string, string>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const url     = new URL(urlStr);
+    const socket  = tls.connect({ host: url.hostname, port: 443, ...TLS_OPTS }, () => {
+      const hLines = Object.entries({ Host: url.hostname, Connection: "close", ...headers })
+        .map(([k, v]) => `${k}: ${v}`).join("\r\n");
+      socket.write(`GET ${url.pathname}${url.search} HTTP/1.1\r\n${hLines}\r\n\r\n`);
+    });
+
+    const chunks: Buffer[] = [];
+    socket.on("data", (d: Buffer) => chunks.push(d));
+    socket.on("end", () => {
+      const raw    = Buffer.concat(chunks);
+      const sepIdx = raw.indexOf("\r\n\r\n");
+      if (sepIdx === -1) return reject(new Error("Resposta HTTP inválida do SisLav"));
+
+      const headerText = raw.slice(0, sepIdx).toString("utf8");
+      const body       = raw.slice(sepIdx + 4).toString("utf8");
+
+      // Detecta rate-limit via header (status code não é confiável)
+      const rlMatch   = headerText.match(/X-RateLimit-Remaining:\s*(\d+)/i);
+      const remaining = rlMatch ? parseInt(rlMatch[1]) : 99;
+      if (remaining === 0) return reject(new Error("429 rate limited"));
+
+      try   { resolve(JSON.parse(body)); }
+      catch { reject(new Error("SisLav JSON parse error")); }
+    });
+    socket.on("error", reject);
+    socket.setTimeout(30_000, () => { socket.destroy(); reject(new Error("SisLav timeout")); });
+  });
+}
 
 async function get<T>(path: string, orgId?: string): Promise<T> {
   const headers: Record<string, string> = { "X-API-KEY": API_KEY };
   if (orgId) headers["X-ORG-ID"] = orgId;
-  const res = await axios.get<T>(`${BASE}${path}`, { headers, httpsAgent });
-  return res.data;
+  return rawGet<T>(`${BASE}${path}`, headers);
 }
 
 async function getAll<T>(path: string, orgId?: string, limit = 100, since?: Date): Promise<T[]> {
