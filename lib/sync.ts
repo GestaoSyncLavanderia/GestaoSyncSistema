@@ -63,11 +63,7 @@ export async function syncAll(): Promise<{
 
   // Full sync (sem histórico ou dados obsoletos): processa 1 por vez para não bater rate limit 429
   // Incremental: paralelo é seguro (poucas páginas por laundry)
-  const fullSyncLaundries = laundries.filter((l) => {
-    if (!laundriesWithSales.has(l.id)) return true;
-    const lastSale = lastSaleByLaundry.get(l.id);
-    return staleThreshold && (!lastSale || lastSale < staleThreshold);
-  });
+  const fullSyncLaundries = laundries.filter((l) => !laundriesWithSales.has(l.id));
   const fullSyncIds       = new Set(fullSyncLaundries.map((l) => l.id));
   const incrSyncLaundries = laundries.filter((l) => !fullSyncIds.has(l.id));
 
