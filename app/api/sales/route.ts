@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { Prisma } from "@/lib/generated/prisma/client";
 import { subDays } from "date-fns";
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -23,7 +24,17 @@ export async function GET(req: NextRequest) {
   const page          = parseInt(searchParams.get("page") ?? "1");
   const limit         = parseInt(searchParams.get("limit") ?? "20");
 
-  const where: any = {};
+  // Busca o revenueMetric da unidade para calcular faturamento corretamente
+  let revenueMetric = "totalValueNonBalance";
+  if (laundryId) {
+    const lnd = await db.laundry.findUnique({
+      where: { id: laundryId },
+      select: { revenueMetric: true },
+    });
+    revenueMetric = lnd?.revenueMetric ?? "totalValueNonBalance";
+  }
+
+  const where: any = { status: { not: "Em uso" } };
   if (laundryId)     where.laundryId     = laundryId;
   if (paymentMethod) where.paymentMethod = paymentMethod;
   if (from || to) {
@@ -54,7 +65,7 @@ export async function GET(req: NextRequest) {
     db.cycle.count({ where }),
     db.cycle.aggregate({
       where,
-      _sum: { totalPaidValue: true, machinesCount: true },
+      _sum: { totalPaidValue: true, totalValue: true, machinesCount: true },
     }),
     db.cycle.aggregate({
       where,
@@ -76,21 +87,36 @@ export async function GET(req: NextRequest) {
 
   const dailyFrom = from ? new Date(from + "T00:00:00Z") : subDays(new Date(), 29);
   const dailyTo   = to   ? new Date(to + "T23:59:59.999Z") : new Date();
-  const dailyWhere: any = { cycleDate: { gte: dailyFrom, lte: dailyTo } };
-  if (laundryId) dailyWhere.laundryId = laundryId;
 
-  const dailyRaw = await db.cycle.groupBy({
-    by: ["cycleDate"],
-    _sum: { totalPaidValue: true, machinesCount: true },
-    where: dailyWhere,
-    orderBy: { cycleDate: "asc" },
-  });
+  const revExpr =
+    revenueMetric === "totalValue"
+      ? Prisma.sql`c."totalValue"`
+      : revenueMetric === "paidValue"
+      ? Prisma.sql`c."totalPaidValue"`
+      : Prisma.sql`CASE WHEN c."paymentMethod" != 'BALANCE' THEN c."totalValue" ELSE 0 END`;
+
+  const laundryFilter = laundryId
+    ? Prisma.sql`AND c."laundryId" = ${laundryId}`
+    : Prisma.empty;
+
+  const dailyRaw = await db.$queryRaw<Array<{ cycleDate: Date; total: number; cycles: bigint }>>`
+    SELECT
+      c."cycleDate",
+      COALESCE(SUM(${revExpr}), 0)::float8 AS total,
+      COALESCE(SUM(c."machinesCount"), 0) AS cycles
+    FROM "Cycle" c
+    WHERE c."cycleDate" >= ${dailyFrom} AND c."cycleDate" <= ${dailyTo}
+    AND (c."status" IS NULL OR c."status" != 'Em uso')
+    ${laundryFilter}
+    GROUP BY c."cycleDate"
+    ORDER BY c."cycleDate" ASC
+  `;
 
   // cycleDate é armazenado como UTC midnight do dia Brasil → toISOString é timezone-safe
   const dailyMap = new Map(
     dailyRaw.map((d) => [
       d.cycleDate.toISOString().slice(0, 10),
-      { total: d._sum.totalPaidValue ?? 0, cycles: Number(d._sum.machinesCount ?? 0) },
+      { total: d.total, cycles: Number(d.cycles) },
     ])
   );
 
@@ -133,7 +159,23 @@ export async function GET(req: NextRequest) {
     });
 
   const totalSalesCount = Number(agg._sum.machinesCount ?? 0);
-  const ticketMedio = totalSalesCount > 0 ? (agg._sum.totalPaidValue ?? 0) / totalSalesCount : 0;
+
+  // Calcula faturamento respeitando o revenueMetric da unidade
+  let faturamento: number;
+  if (revenueMetric === "totalValue") {
+    faturamento = agg._sum.totalValue ?? 0;
+  } else if (revenueMetric === "paidValue") {
+    faturamento = agg._sum.totalPaidValue ?? 0;
+  } else {
+    // totalValueNonBalance: soma totalValue excluindo ciclos BALANCE
+    const nbAgg = await db.cycle.aggregate({
+      where: { ...where, paymentMethod: { not: "BALANCE" } },
+      _sum: { totalValue: true },
+    });
+    faturamento = nbAgg._sum.totalValue ?? 0;
+  }
+
+  const ticketMedio = totalSalesCount > 0 ? faturamento / totalSalesCount : 0;
 
   return NextResponse.json({
     cycles,
@@ -141,7 +183,7 @@ export async function GET(req: NextRequest) {
     page,
     limit,
     agg: {
-      totalPaidValue: agg._sum.totalPaidValue ?? 0,
+      totalPaidValue: faturamento,
       count: totalSalesCount,
       ticketMedio,
       avgMachines: avgMachines._avg.machinesCount ?? 0,

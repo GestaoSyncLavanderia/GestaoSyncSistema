@@ -45,6 +45,7 @@ model Sale {
   machineType       String
   machines          Int[]
   serviceType       String
+  status            String    @default("")
   date              DateTime
   syncedAt          DateTime  @default(now())
 
@@ -63,6 +64,7 @@ model Cycle {
   totalValue     Float
   salesCount     Int
   paymentMethod  String
+  status         String   @default("")
   cycleDate      DateTime
   syncedAt       DateTime @default(now())
 

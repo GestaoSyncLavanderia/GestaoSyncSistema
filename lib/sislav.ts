@@ -6,6 +6,13 @@ const API_KEY = process.env.SISLAV_API_KEY!;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+// A API do SisLav retorna datas como "YYYY-MM-DD HH:MM" em UTC sem marcador de fuso.
+// new Date() sem sufixo interpreta como horário local — incorreto em máquinas não-UTC.
+// Forçamos UTC adicionando "Z" para garantir parse correto em qualquer ambiente.
+export function parseSislavDate(s: string): Date {
+  return new Date(s.trim().replace(" ", "T") + "Z");
+}
+
 // O servidor do SisLav envia bytes nulos no lugar do status code HTTP ("HTTP/1.1 \x00\x00\x00…"),
 // o que quebra todos os parsers HTTP padrão (undici, http.request, axios).
 // A solução é TLS raw: conecta direto, lê os bytes, extrai o body após \r\n\r\n.
@@ -14,6 +21,23 @@ const TLS_OPTS = {
   secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT | 0x00040000,
   minVersion: "TLSv1" as const,
 };
+
+// Decodifica Transfer-Encoding: chunked (HTTP/1.1) — necessário para respostas grandes
+function decodeChunked(buf: Buffer): Buffer {
+  const out: Buffer[] = [];
+  let pos = 0;
+  while (pos < buf.length) {
+    const lineEnd = buf.indexOf("\r\n", pos);
+    if (lineEnd < 0) break;
+    const sizeLine = buf.slice(pos, lineEnd).toString("ascii").split(";")[0].trim();
+    const chunkSize = parseInt(sizeLine, 16);
+    if (isNaN(chunkSize) || chunkSize === 0) break;
+    pos = lineEnd + 2;
+    out.push(buf.slice(pos, pos + chunkSize));
+    pos += chunkSize + 2;
+  }
+  return Buffer.concat(out);
+}
 
 function rawGet<T>(urlStr: string, headers: Record<string, string>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -36,11 +60,14 @@ function rawGet<T>(urlStr: string, headers: Record<string, string>): Promise<T> 
         return reject(new Error(`SisLav: sep não encontrado (${raw.length} bytes, hex: ${raw.slice(0, 30).toString("hex")})`));
 
       const headerText = raw.slice(0, sepIdx).toString("utf8");
-      const body       = raw.slice(sepIdx + 4).toString("utf8");
+      const rawBody    = raw.slice(sepIdx + 4);
 
       const rlMatch   = headerText.match(/X-RateLimit-Remaining:\s*(\d+)/i);
       const remaining = rlMatch ? parseInt(rlMatch[1]) : 99;
       if (remaining === 0) return reject(new Error("429 rate limited"));
+
+      const isChunked = /transfer-encoding:\s*chunked/i.test(headerText);
+      const body      = (isChunked ? decodeChunked(rawBody) : rawBody).toString("utf8");
 
       try   { resolve(JSON.parse(body)); }
       catch { reject(new Error(`SisLav JSON parse error: ${body.slice(0, 80)}`)); }
@@ -92,7 +119,7 @@ async function getAll<T>(path: string, orgId?: string, limit = 100, since?: Date
 
     if (since && result!.data.length > 0) {
       const last = (result!.data[result!.data.length - 1] as any)?.date;
-      if (last && new Date(last) < since) break;
+      if (last && parseSislavDate(last) < since) break;
     }
 
     page++;

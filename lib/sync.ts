@@ -1,5 +1,7 @@
 import { db } from "./db";
 import * as api from "./sislav";
+import { parseSislavDate } from "./sislav";
+import { fetchStatusMap } from "./sislav-webapp";
 import { startOfDay, subHours } from "date-fns";
 
 // Retorna o midnight UTC correspondente ao dia de Brasília (UTC-3) do timestamp
@@ -32,7 +34,7 @@ export async function syncAll(): Promise<{
   await syncLaundries();
   timing.syncLaundries = Date.now() - t0;
 
-  const laundries = await db.laundry.findMany({ select: { id: true, organizationId: true } });
+  const laundries = await db.laundry.findMany({ select: { id: true, organizationId: true, name: true } });
 
   const lastLog = await db.syncLog.findFirst({
     where: { entity: "sales", status: "success" },
@@ -41,24 +43,35 @@ export async function syncAll(): Promise<{
   const since = lastLog ? subHours(lastLog.createdAt, 1) : undefined;
   timing.since = since?.getTime() ?? 0;
 
+  // Mapa laundryId → data da última venda no DB (para detectar unidades com dados obsoletos)
+  const lastSaleRows = since
+    ? await db.sale.groupBy({ by: ["laundryId"], _max: { date: true } })
+    : [];
+  const lastSaleByLaundry = new Map(lastSaleRows.map((r) => [r.laundryId, r._max.date]));
+
   const laundriesWithSales = since
-    ? new Set(
-        (await db.sale.findMany({ select: { laundryId: true }, distinct: ["laundryId"] }))
-          .map((s) => s.laundryId)
-      )
+    ? new Set(lastSaleByLaundry.keys())
     : new Set<string>();
+
+  // Unidade com última venda >6h antes de `since` recebe full resync para fechar o gap
+  const staleThreshold = since ? new Date(since.getTime() - 6 * 60 * 60 * 1000) : undefined;
 
   const t2 = Date.now();
   const salesBefore  = await db.sale.count();
   const cyclesBefore = await db.cycle.count();
 
-  // Full sync (sem histórico): processa 1 por vez para não bater rate limit 429
+  // Full sync (sem histórico ou dados obsoletos): processa 1 por vez para não bater rate limit 429
   // Incremental: paralelo é seguro (poucas páginas por laundry)
-  const fullSyncLaundries = laundries.filter((l) => !laundriesWithSales.has(l.id));
-  const incrSyncLaundries = laundries.filter((l) => laundriesWithSales.has(l.id));
+  const fullSyncLaundries = laundries.filter((l) => {
+    if (!laundriesWithSales.has(l.id)) return true;
+    const lastSale = lastSaleByLaundry.get(l.id);
+    return staleThreshold && (!lastSale || lastSale < staleThreshold);
+  });
+  const fullSyncIds       = new Set(fullSyncLaundries.map((l) => l.id));
+  const incrSyncLaundries = laundries.filter((l) => !fullSyncIds.has(l.id));
 
   await batch(fullSyncLaundries, 1, async (l) => {
-    const err = await syncSales(l.id, l.organizationId, laundriesWithSales, since);
+    const err = await syncSales(l.id, l.organizationId, laundriesWithSales, undefined);
     if (err) errors.push(`${l.id}: ${err}`);
   });
   await batch(incrSyncLaundries, LAUNDRY_BATCH, async (l) => {
@@ -69,9 +82,53 @@ export async function syncAll(): Promise<{
   const newSales  = (await db.sale.count())  - salesBefore;
   const newCycles = (await db.cycle.count()) - cyclesBefore;
   timing.syncSales = Date.now() - t2;
-  timing.total     = Date.now() - t0;
+
+  // Enriquece status das vendas via web app e reconstrói ciclos afetados
+  if (since) {
+    const t3 = Date.now();
+    await syncStatus(since, new Date(), laundries, errors);
+    timing.syncStatus = Date.now() - t3;
+  }
+
+  timing.total = Date.now() - t0;
 
   return { newSales, newCycles, timing, errors };
+}
+
+async function syncStatus(
+  from: Date,
+  to: Date,
+  laundries: { id: string; organizationId: string; name: string }[],
+  errors: string[]
+) {
+  const affectedLaundryIds = new Set<string>();
+
+  // Processa uma lavanderia por vez — a conta web pode não ter acesso a todas as orgs
+  for (const l of laundries) {
+    try {
+      const map = await fetchStatusMap(l.id, l.organizationId, from, to);
+      if (map.size === 0) continue;
+
+      const emUso = [...map.entries()].filter(([, v]) => v === "Em uso").map(([k]) => k);
+      const concl = [...map.entries()].filter(([, v]) => v === "Concluído").map(([k]) => k);
+
+      if (emUso.length > 0)
+        await db.sale.updateMany({ where: { id: { in: emUso } }, data: { status: "Em uso" } });
+      if (concl.length > 0)
+        await db.sale.updateMany({ where: { id: { in: concl } }, data: { status: "Concluído" } });
+
+      affectedLaundryIds.add(l.id);
+    } catch (err: any) {
+      // Não fatal por lavanderia: pode ser que a conta não tenha acesso a esta org
+      errors.push(`syncStatus[${l.name}]: ${err.message}`);
+    }
+  }
+
+  // Reconstrói ciclos apenas para as lavanderias com status atualizado
+  const affected = laundries.filter((l) => affectedLaundryIds.has(l.id));
+  await batch(affected, LAUNDRY_BATCH, async (l) => {
+    await buildCyclesForLaundry(l.id, from);
+  });
 }
 
 export async function syncLaundries() {
@@ -124,7 +181,7 @@ export async function syncSales(
     const effectiveSince = laundriesWithSales.has(laundryId) ? since : undefined;
     const allData = await api.getSales(laundryId, orgId, effectiveSince);
     const data = effectiveSince
-      ? allData.filter((s: any) => new Date(s.date) >= effectiveSince)
+      ? allData.filter((s: any) => parseSislavDate(s.date) >= effectiveSince)
       : allData;
 
     // Ignorar vendas sem cliente válido
@@ -187,7 +244,7 @@ export async function syncSales(
           machineType: s.machineType ?? "",
           machines: Array.isArray(s.machines) ? s.machines : [],
           serviceType: s.serviceType ?? "",
-          date: new Date(s.date),
+          date: parseSislavDate(s.date),
         },
       });
     });
@@ -240,6 +297,12 @@ export async function buildCyclesForLaundry(laundryId: string, since?: Date) {
       const mc = (s.machines as any[]).length;
       return sum + (mc > 0 ? mc : 1);
     }, 0);
+    // Ciclo "Em uso" se qualquer venda estiver em andamento; "" se nenhuma tem status
+    const cycleStatus = daySales.some((s) => s.status === "Em uso")
+      ? "Em uso"
+      : daySales.some((s) => s.status === "Concluído")
+      ? "Concluído"
+      : "";
 
     await db.cycle.upsert({
       where: {
@@ -256,6 +319,7 @@ export async function buildCyclesForLaundry(laundryId: string, since?: Date) {
         totalPaidValue: daySales.reduce((a, s) => a + s.paidValue, 0),
         totalValue:     daySales.reduce((a, s) => a + s.totalValue, 0),
         salesCount:     daySales.length,
+        status:         cycleStatus,
         syncedAt:       new Date(),
       },
       create: {
@@ -269,6 +333,7 @@ export async function buildCyclesForLaundry(laundryId: string, since?: Date) {
         totalValue:     daySales.reduce((a, s) => a + s.totalValue, 0),
         salesCount:     daySales.length,
         paymentMethod:  daySales[0].paymentMethod,
+        status:         cycleStatus,
       },
     });
   });
