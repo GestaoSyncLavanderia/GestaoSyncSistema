@@ -25,14 +25,19 @@ async function revenueForPeriod(gte: Date, lte: Date): Promise<number> {
   const rows = await db.$queryRaw<[{ rev: number }]>`
     SELECT COALESCE(SUM(
       CASE l."revenueMetric"
-        WHEN 'totalValue' THEN c."totalValue"
-        WHEN 'paidValue'  THEN c."totalPaidValue"
-        ELSE CASE WHEN c."paymentMethod" != 'BALANCE' THEN c."totalValue" ELSE 0 END
+        WHEN 'totalValue' THEN
+          CASE WHEN c."machineType" != '' THEN c."totalValue" ELSE 0 END
+        WHEN 'paidValue' THEN
+          -- paidValue inclui BALANCE_PURCHASE (machineType='') pois representam dinheiro recebido
+          c."totalPaidValue"
+        ELSE
+          CASE WHEN c."machineType" != '' AND c."paymentMethod" != 'BALANCE' THEN c."totalValue" ELSE 0 END
       END
     ), 0)::float8 AS rev
     FROM "Cycle" c
     JOIN "Laundry" l ON l.id = c."laundryId"
     WHERE c."cycleDate" >= ${gte} AND c."cycleDate" <= ${lte}
+    AND (c."status" IS NULL OR c."status" != 'Em uso')
   `;
   return rows[0]?.rev ?? 0;
 }
@@ -63,13 +68,15 @@ export async function GET() {
     revenueForPeriod(todayStart, todayEnd),
     revenueForPeriod(monthStart, monthEnd),
     revenueForPeriod(yearStart,  yearEnd),
-    db.cycle.aggregate({ _sum: { machinesCount: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
+    db.cycle.aggregate({ _sum: { machinesCount: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd }, status: { not: "Em uso" }, machineType: { not: "" } } }),
     db.$queryRaw<[{ visits: bigint }]>`
       SELECT COUNT(DISTINCT "customerId"::text || "cycleDate"::text) AS visits
       FROM "Cycle"
       WHERE "cycleDate" >= ${todayStart} AND "cycleDate" <= ${todayEnd}
+      AND ("status" IS NULL OR "status" != 'Em uso')
+      AND "machineType" != ''
     `,
-    db.cycle.aggregate({ _avg: { machinesCount: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd } } }),
+    db.cycle.aggregate({ _avg: { machinesCount: true }, where: { cycleDate: { gte: todayStart, lte: todayEnd }, status: { not: "Em uso" }, machineType: { not: "" } } }),
     db.$queryRaw<Array<{ laundryId: string; total: number; cycles: number }>>`
       SELECT
         c."laundryId",
@@ -84,11 +91,13 @@ export async function GET() {
       FROM "Cycle" c
       JOIN "Laundry" l ON l.id = c."laundryId"
       WHERE c."cycleDate" >= ${todayStart} AND c."cycleDate" <= ${todayEnd}
+      AND (c."status" IS NULL OR c."status" != 'Em uso')
+      AND c."machineType" != ''
       GROUP BY c."laundryId"
       ORDER BY total DESC
       LIMIT 5
     `,
-    db.cycle.aggregate({ _sum: { machinesCount: true }, where: { cycleDate: { gte: monthStart, lte: monthEnd } } }),
+    db.cycle.aggregate({ _sum: { machinesCount: true }, where: { cycleDate: { gte: monthStart, lte: monthEnd }, status: { not: "Em uso" }, machineType: { not: "" } } }),
   ]);
 
   const laundryIds = rankingHoje.map((r) => r.laundryId);

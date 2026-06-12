@@ -1,7 +1,7 @@
 import { db } from "./db";
 import * as api from "./sislav";
 import { parseSislavDate } from "./sislav";
-import { fetchStatusMap } from "./sislav-webapp";
+import { fetchSalesFromWebApp, fetchStatusMap } from "./sislav-webapp";
 import { startOfDay, subHours } from "date-fns";
 
 // Retorna o midnight UTC correspondente ao dia de Brasília (UTC-3) do timestamp
@@ -11,9 +11,9 @@ export function brazilDayUTC(utcDate: Date): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
-const LAUNDRY_BATCH = 5;
-const CYCLE_BATCH   = 20;
-const UPSERT_BATCH  = 20;
+const LAUNDRY_BATCH = 3;
+const CYCLE_BATCH   = 10;
+const UPSERT_BATCH  = 5;
 
 async function batch<T>(items: T[], size: number, fn: (item: T) => Promise<void>) {
   for (let i = 0; i < items.length; i += size) {
@@ -53,8 +53,9 @@ export async function syncAll(): Promise<{
     ? new Set(lastSaleByLaundry.keys())
     : new Set<string>();
 
-  // Unidade com última venda >6h antes de `since` recebe full resync para fechar o gap
-  const staleThreshold = since ? new Date(since.getTime() - 6 * 60 * 60 * 1000) : undefined;
+  // Sem threshold de stale: cron é sempre incremental para unidades já conhecidas.
+  // Full resync só ocorre para unidades sem nenhuma venda no banco (novas).
+  const staleThreshold = undefined;
 
   const t2 = Date.now();
   const salesBefore  = await db.sale.count();
@@ -71,24 +72,17 @@ export async function syncAll(): Promise<{
   const incrSyncLaundries = laundries.filter((l) => !fullSyncIds.has(l.id));
 
   await batch(fullSyncLaundries, 1, async (l) => {
-    const err = await syncSales(l.id, l.organizationId, laundriesWithSales, undefined);
-    if (err) errors.push(`${l.id}: ${err}`);
+    const err = await syncSalesWebApp(l.id, l.organizationId, laundriesWithSales, undefined);
+    if (err) errors.push(`${l.name}: ${err}`);
   });
   await batch(incrSyncLaundries, LAUNDRY_BATCH, async (l) => {
-    const err = await syncSales(l.id, l.organizationId, laundriesWithSales, since);
-    if (err) errors.push(`${l.id}: ${err}`);
+    const err = await syncSalesWebApp(l.id, l.organizationId, laundriesWithSales, since);
+    if (err) errors.push(`${l.name}: ${err}`);
   });
 
   const newSales  = (await db.sale.count())  - salesBefore;
   const newCycles = (await db.cycle.count()) - cyclesBefore;
   timing.syncSales = Date.now() - t2;
-
-  // Enriquece status das vendas via web app e reconstrói ciclos afetados
-  if (since) {
-    const t3 = Date.now();
-    await syncStatus(since, new Date(), laundries, errors);
-    timing.syncStatus = Date.now() - t3;
-  }
 
   timing.total = Date.now() - t0;
 
@@ -337,6 +331,109 @@ export async function buildCyclesForLaundry(laundryId: string, since?: Date) {
       },
     });
   });
+}
+
+/**
+ * Sincroniza vendas de uma lavanderia via web app do SisLav.
+ * Substitui syncSales + syncStatus: já obtém status, paidAmount e totalAmount corretos.
+ * Em caso de falha (ex: org sem acesso), faz fallback para o backend API.
+ */
+export async function syncSalesWebApp(
+  laundryId: string,
+  orgId: string,
+  laundriesWithSales: Set<string>,
+  since?: Date,
+): Promise<string | null> {
+  try {
+    const effectiveSince = laundriesWithSales.has(laundryId) ? since : undefined;
+    const allData = await fetchSalesFromWebApp(laundryId, orgId, effectiveSince);
+
+    const validData = allData.filter((s) => s.customer?.id);
+
+    // Clientes
+    await batch(validData, UPSERT_BATCH, async (s) => {
+      await db.customer.upsert({
+        where: { id: s.customer.id },
+        update: {
+          name:   s.customer.name,
+          email:  s.customer.email  ?? null,
+          mobile: s.customer.phone  ?? null,
+        },
+        create: {
+          id:           s.customer.id,
+          name:         s.customer.name,
+          email:        s.customer.email  ?? null,
+          mobile:       s.customer.phone  ?? null,
+          document:     s.customer.cpf?.replace(/\D/g, "") ?? "",
+          documentType: s.customer.cpf ? "CPF" : "",
+          birthDate:    null,
+        },
+      });
+    });
+
+    // CustomerLaundry
+    const uniqueCustomerIds = [...new Set(validData.map((s) => s.customer.id))];
+    for (const customerId of uniqueCustomerIds) {
+      await db.customerLaundry.upsert({
+        where: { customerId_laundryId: { customerId, laundryId } },
+        update: {},
+        create: { customerId, laundryId },
+      });
+    }
+
+    // Sales (upsert: atualiza status + valores se a venda já existir)
+    await batch(validData, UPSERT_BATCH, async (s) => {
+      const machinesFromApi = s.machines.length > 0 ? s.machines : undefined;
+      await db.sale.upsert({
+        where: { id: s.id },
+        update: {
+          status:        s.status,
+          paidValue:     s.paidValue,
+          totalValue:    s.totalValue,
+          paymentMethod: s.paymentMethod,
+          machineType:   s.machineType,
+          serviceType:   s.serviceType,
+          ...(machinesFromApi && { machines: machinesFromApi }),
+        },
+        create: {
+          id:                s.id,
+          laundryId,
+          customerId:        s.customer.id,
+          customerName:      s.customer.name,
+          customerDoc:       s.customer.cpf?.replace(/\D/g, "") ?? "",
+          customerEmail:     s.customer.email  ?? null,
+          customerMobile:    s.customer.phone  ?? null,
+          customerBirthDate: null,
+          documentType:      s.customer.cpf ? "CPF" : "",
+          paidValue:         s.paidValue,
+          totalValue:        s.totalValue,
+          paymentMethod:     s.paymentMethod,
+          machineType:       s.machineType,
+          machines:          s.machines,
+          serviceType:       s.serviceType,
+          status:            s.status,
+          date:              s.date,
+        },
+      });
+    });
+
+    // Só reconstrói ciclos se houve dados para processar — evita rebuild completo em unidades inativas
+    if (validData.length > 0) {
+      await buildCyclesForLaundry(laundryId, effectiveSince);
+    }
+    await db.syncLog.create({ data: { entity: "sales", status: "success" } });
+    return null;
+  } catch (err: any) {
+    // Fallback: tenta backend API se web app falhar (ex: org sem acesso)
+    const fallbackErr = await syncSales(laundryId, orgId, laundriesWithSales, since);
+    if (fallbackErr) {
+      await db.syncLog.create({
+        data: { entity: "sales", status: "error", message: `webapp: ${err.message} | api: ${fallbackErr}` },
+      });
+      return `webapp: ${err.message}`;
+    }
+    return null;
+  }
 }
 
 // Mantido para compatibilidade com imports externos (ex: api/sync/test)

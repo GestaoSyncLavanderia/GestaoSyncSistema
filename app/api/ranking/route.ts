@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   const grouped = await db.cycle.groupBy({
     by: ["laundryId"],
     _sum: { totalPaidValue: true, machinesCount: true },
-    where: { cycleDate: { gte } },
+    where: { cycleDate: { gte }, status: { not: "Em uso" }, machineType: { not: "" } },
     orderBy: { _sum: { totalPaidValue: "desc" } },
   });
 

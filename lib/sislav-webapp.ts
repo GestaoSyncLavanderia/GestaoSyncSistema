@@ -1,5 +1,5 @@
-// Autentica no app web do SisLav (app.sislav.com.br) para obter o campo `status`
-// das vendas ("Em uso" | "Concluído") — ausente na API de franchise.
+// Autentica no app web do SisLav (app.sislav.com.br) para obter status e dados
+// completos de vendas (paidAmount, totalAmount, usedBalance, type, status).
 
 const WEB_BASE = "https://app.sislav.com.br";
 
@@ -46,6 +46,137 @@ async function getSession(): Promise<string> {
   const token = await login();
   sessionCache = { token, exp: Date.now() + 8 * 60 * 60 * 1000 }; // 8h
   return token;
+}
+
+// ── Mapeamentos web app → modelo interno ──────────────────────────────────────
+
+const MACHINE_TYPE_MAP: Record<string, string> = {
+  Lavadora: "WASHER",
+  Secadora: "DRYER",
+  Saldo:    "",   // BALANCE_PURCHASE — excluído do faturamento
+};
+
+const PAYMENT_MAP: Record<number, string> = {
+  1: "CREDIT",
+  2: "DEBIT",
+  3: "PIX",
+  7: "BALANCE",
+};
+
+// "12/06/2026 12:14" (Brasília, UTC-3) → Date UTC
+function parseWebAppDate(s: string): Date {
+  const [datePart, timePart] = s.trim().split(" ");
+  const [day, month, year]   = datePart.split("/").map(Number);
+  const [hour, minute]        = timePart.split(":").map(Number);
+  return new Date(Date.UTC(year, month - 1, day, hour + 3, minute));
+}
+
+// Data UTC → string "YYYY-MM-DD" no fuso Brasília (UTC-3)
+function brazilDateStr(d: Date): string {
+  return new Date(d.getTime() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+export type WebAppSale = {
+  id: string;
+  date: Date;
+  machineType: string;
+  serviceType: string;
+  machines: number[];
+  paidValue: number;
+  totalValue: number;
+  paymentMethod: string;
+  status: string;
+  customer: {
+    id: string;
+    name: string;
+    cpf: string | null;
+    phone: string | null;
+    email: string | null;
+  };
+};
+
+/**
+ * Busca todas as vendas de uma lavanderia via web app, retornando dados
+ * completos (paidAmount→paidValue, totalAmount→totalValue, status nativo).
+ * Se `since` for informado, limita ao intervalo desde esse dia (Brasília).
+ */
+export async function fetchSalesFromWebApp(
+  laundryId: string,
+  orgId: string,
+  since?: Date,
+): Promise<WebAppSale[]> {
+  if (!process.env.SISLAV_WEB_EMAIL || !process.env.SISLAV_WEB_PASSWORD) {
+    throw new Error("SISLAV_WEB_EMAIL e SISLAV_WEB_PASSWORD não configurados");
+  }
+
+  const token = await getSession();
+  const all: WebAppSale[] = [];
+  let page = 1;
+
+  // Subtrai 1 dia do since para garantir cobertura na fronteira de meia-noite
+  // Incremental: 1 dia antes do since para cobrir fronteira de meia-noite.
+  // Full sync (since=undefined): máximo 30 dias — evita timeout no Vercel Hobby.
+  const start = since
+    ? brazilDateStr(new Date(since.getTime() - 24 * 60 * 60 * 1000))
+    : brazilDateStr(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+  // Amanhã em Brasília para capturar vendas do dia ainda em andamento
+  const end = brazilDateStr(new Date(Date.now() + 24 * 60 * 60 * 1000));
+
+  while (true) {
+    const qs =
+      `dateRange%5B%5D=${start}&dateRange%5B%5D=${end}` +
+      `&laundryId=${laundryId}&page=${page}&itemsPerPage=100` +
+      `&sortField=date&sortDirection=desc`;
+
+    const res = await fetch(`${WEB_BASE}/api/sales?${qs}`, {
+      headers: {
+        Cookie:              `authjs.session-token=${token}`,
+        "x-organization-id": orgId,
+        "User-Agent":        "Mozilla/5.0",
+        Accept:              "application/json, text/plain, */*",
+      },
+    });
+
+    if (res.status === 401 || res.redirected) {
+      sessionCache = null;
+      throw new Error("SisLav web sessão expirada (401)");
+    }
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`SisLav web sales ${res.status}: ${body.slice(0, 120)}`);
+    }
+
+    const json = (await res.json()) as { sales?: any[]; total?: number };
+
+    for (const s of json.sales ?? []) {
+      if (!s.id || !s.customer?.id) continue;
+      all.push({
+        id:            s.id,
+        date:          parseWebAppDate(s.date),
+        machineType:   MACHINE_TYPE_MAP[s.cycle] ?? "",
+        serviceType:   s.type ?? "SALE",
+        machines:      Array.isArray(s.machines) ? s.machines : [],
+        paidValue:     s.paidAmount  ?? 0,
+        totalValue:    s.totalAmount ?? 0,
+        paymentMethod: PAYMENT_MAP[s.payment as number] ?? "",
+        status:        s.status ?? "",
+        customer: {
+          id:    s.customer.id,
+          name:  s.customer.name  ?? "",
+          cpf:   s.customer.cpf   ?? null,
+          phone: s.customer.phone ?? null,
+          email: s.customer.email ?? null,
+        },
+      });
+    }
+
+    const totalPages = Math.ceil((json.total ?? 0) / 100);
+    if (page >= totalPages || !json.sales?.length) break;
+    page++;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  return all;
 }
 
 /**
