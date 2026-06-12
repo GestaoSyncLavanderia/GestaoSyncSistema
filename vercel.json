@@ -1,8 +1,7 @@
 {
-  "crons": [
-    {
-      "path": "/api/cron/sync",
-      "schedule": "*/10 * * * *"
+  "functions": {
+    "app/api/cron/sync/route.ts": {
+      "maxDuration": 300
     }
-  ]
+  }
 }
