@@ -107,6 +107,7 @@ export async function GET(req: NextRequest) {
     FROM "Cycle" c
     WHERE c."cycleDate" >= ${dailyFrom} AND c."cycleDate" <= ${dailyTo}
     AND (c."status" IS NULL OR c."status" != 'Em uso')
+    AND c."machineType" != ''
     ${laundryFilter}
     GROUP BY c."cycleDate"
     ORDER BY c."cycleDate" ASC
@@ -160,16 +161,21 @@ export async function GET(req: NextRequest) {
 
   const totalSalesCount = Number(agg._sum.machinesCount ?? 0);
 
+  // machineType="" = BALANCE_PURCHASE (recarga de saldo) — nunca conta como faturamento
+  const revWhere = { ...where, machineType: { not: "" } };
+
   // Calcula faturamento respeitando o revenueMetric da unidade
   let faturamento: number;
   if (revenueMetric === "totalValue") {
-    faturamento = agg._sum.totalValue ?? 0;
+    const revAgg = await db.cycle.aggregate({ where: revWhere, _sum: { totalValue: true } });
+    faturamento = revAgg._sum.totalValue ?? 0;
   } else if (revenueMetric === "paidValue") {
-    faturamento = agg._sum.totalPaidValue ?? 0;
+    const revAgg = await db.cycle.aggregate({ where: revWhere, _sum: { totalPaidValue: true } });
+    faturamento = revAgg._sum.totalPaidValue ?? 0;
   } else {
-    // totalValueNonBalance: soma totalValue excluindo ciclos BALANCE
+    // totalValueNonBalance: soma totalValue excluindo ciclos pagos com saldo
     const nbAgg = await db.cycle.aggregate({
-      where: { ...where, paymentMethod: { not: "BALANCE" } },
+      where: { ...revWhere, paymentMethod: { not: "BALANCE" } },
       _sum: { totalValue: true },
     });
     faturamento = nbAgg._sum.totalValue ?? 0;
