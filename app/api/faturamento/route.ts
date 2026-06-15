@@ -15,9 +15,10 @@ export async function GET(req: NextRequest) {
   const to   = searchParams.get("to")   ?? new Date().toISOString().slice(0, 10);
   const { gte, lt } = toUtcRange(from, to);
 
-  // paidValue: dinheiro efetivamente recebido (BALANCE paidValue=0, excluído automaticamente)
-  // Inclui vendas "Em uso" — espelha aba Dashboard do SisLav
-  const saleWhere = { date: { gte, lt }, machineType: { not: "" } };
+  // paidValue: dinheiro efetivamente recebido — inclui BALANCE_PURCHASE (carregamentos de carteira)
+  // Pagamentos via saldo têm paidValue=0 e ficam excluídos automaticamente da soma
+  // Espelha aba Dashboard do SisLav
+  const saleWhere = { date: { gte, lt } };
 
   const [agg, byLaundryRaw, dailyRaw] = await Promise.all([
     db.sale.aggregate({
@@ -39,7 +40,6 @@ export async function GET(req: NextRequest) {
         COUNT(*)::int8                                    AS count
       FROM "Sale" s
       WHERE s.date >= ${gte} AND s.date < ${lt}
-        AND s."machineType" != ''
       GROUP BY DATE(s.date AT TIME ZONE 'America/Sao_Paulo')
       ORDER BY sale_date ASC
     `,

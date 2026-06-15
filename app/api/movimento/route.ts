@@ -14,9 +14,9 @@ export async function GET(req: NextRequest) {
   const to   = searchParams.get("to")   ?? new Date().toISOString().slice(0, 10);
   const { gte, lt } = toUtcRange(from, to);
 
-  // totalValue: valor bruto de todas as vendas incluindo "Em uso" e pagamentos via saldo
+  // totalValue: valor bruto de todas as vendas incluindo "Em uso", saldo e BALANCE_PURCHASE
   // Espelha aba Vendas do SisLav
-  const saleWhere = { date: { gte, lt }, machineType: { not: "" } };
+  const saleWhere = { date: { gte, lt } };
 
   const [agg, byLaundryRaw, dailyRaw] = await Promise.all([
     db.sale.aggregate({
@@ -38,7 +38,6 @@ export async function GET(req: NextRequest) {
         COUNT(*)::int8                                  AS count
       FROM "Sale" s
       WHERE s.date >= ${gte} AND s.date < ${lt}
-        AND s."machineType" != ''
       GROUP BY DATE(s.date AT TIME ZONE 'America/Sao_Paulo')
       ORDER BY sale_date ASC
     `,
