@@ -72,7 +72,7 @@ function FaturamentoContent() {
       <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-xs text-blue-700">
         <Info size={14} className="mt-0.5 shrink-0" />
         <span>
-          Corresponde à aba <strong>Dashboard</strong> do SisLav — soma o <strong>paidValue</strong> de todas as transações (dinheiro recebido; carregamentos de carteira contam no load, não no uso).
+          Corresponde à aba <strong>Dashboard</strong> do SisLav — soma o <strong>totalValue</strong> das vendas de serviço (ciclos concluídos + diretos em andamento; exclui carregamentos de carteira e ciclos BALANCE em uso).
         </span>
       </div>
 
@@ -82,7 +82,7 @@ function FaturamentoContent() {
           icon={TrendingUp}
           label="Faturamento recebido"
           value={loading ? "..." : formatCurrency(data?.total ?? 0)}
-          sub="paidValue acumulado no período"
+          sub="totalValue de serviços no período"
         />
         <KpiCard
           icon={Repeat}

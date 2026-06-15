@@ -16,31 +16,38 @@ export async function GET(req: NextRequest) {
   const to   = searchParams.get("to")   ?? new Date().toISOString().slice(0, 10);
   const { gte, lt } = toUtcRange(from, to);
 
-  // paidValue de todas as vendas (dinheiro efetivamente recebido).
-  // BALANCE_PURCHASE conta no load; wallet spending (BALANCE SALE) tem paidValue=0 → sem dupla contagem.
+  // totalValue de SALEs (exclui BALANCE_PURCHASE para não contar carregamentos de carteira)
+  // e exclui "Em uso" com BALANCE (serviço ainda não entregue, saldo reservado).
+  // Pagamentos diretos "Em uso" são incluídos pois o dinheiro já foi recebido.
   // Espelha aba Dashboard do SisLav.
-  const saleWhere = { date: { gte, lt } };
+  const saleWhere = {
+    date: { gte, lt },
+    serviceType: "SALE",
+    NOT: { status: "Em uso", paymentMethod: "BALANCE" },
+  };
 
   const [agg, byLaundryRaw, dailyRaw] = await Promise.all([
     db.sale.aggregate({
       where: saleWhere,
-      _sum: { paidValue: true },
+      _sum: { totalValue: true },
       _count: { _all: true },
     }),
     db.sale.groupBy({
       by: ["laundryId"],
       where: saleWhere,
-      _sum: { paidValue: true },
+      _sum: { totalValue: true },
       _count: { _all: true },
-      orderBy: { _sum: { paidValue: "desc" } },
+      orderBy: { _sum: { totalValue: "desc" } },
     }),
     db.$queryRaw<Array<{ sale_date: Date; total: number; count: bigint }>>`
       SELECT
         DATE(s.date AT TIME ZONE 'America/Sao_Paulo') AS sale_date,
-        COALESCE(SUM(s."paidValue"), 0)::float8          AS total,
+        COALESCE(SUM(s."totalValue"), 0)::float8         AS total,
         COUNT(*)::int8                                    AS count
       FROM "Sale" s
       WHERE s.date >= ${gte} AND s.date < ${lt}
+        AND s."serviceType" = 'SALE'
+        AND NOT (s.status = 'Em uso' AND s."paymentMethod" = 'BALANCE')
       GROUP BY DATE(s.date AT TIME ZONE 'America/Sao_Paulo')
       ORDER BY sale_date ASC
     `,
@@ -56,13 +63,13 @@ export async function GET(req: NextRequest) {
       : [];
   const laundryMap = Object.fromEntries(laundries.map((l) => [l.id, l]));
 
-  const total       = agg._sum.paidValue ?? 0;
+  const total       = agg._sum.totalValue ?? 0;
   const count       = agg._count._all;
   const ticketMedio = count > 0 ? total / count : 0;
 
   const ranking = byLaundryRaw.map((r, i) => {
     const l         = laundryMap[r.laundryId];
-    const unitTotal = r._sum.paidValue ?? 0;
+    const unitTotal = r._sum.totalValue ?? 0;
     const unitCount = r._count._all;
     return {
       position:     i + 1,
