@@ -72,8 +72,8 @@ function MovimentoContent() {
       <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-700">
         <Info size={14} className="mt-0.5 shrink-0" />
         <span>
-          Corresponde à aba <strong>Vendas</strong> do SisLav — soma o <strong>totalValue</strong> de todas as vendas,
-          incluindo ciclos em andamento e pagamentos via saldo da carteira.
+          Corresponde à aba <strong>Vendas</strong> do SisLav — soma o <strong>paidValue</strong> das vendas
+          <strong>Concluído</strong> (ciclos "Em uso" são excluídos, assim como no SisLav).
         </span>
       </div>
 
