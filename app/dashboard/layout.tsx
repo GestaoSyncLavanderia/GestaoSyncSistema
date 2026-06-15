@@ -21,6 +21,11 @@ const TABS_CONFIG: { key: TabKey; label: string }[] = [
   { key: "duplicates", label: "Vendas duplicadas" },
 ];
 
+const PAGE_TABS: { href: string; label: string }[] = [
+  { href: "/dashboard/faturamento", label: "Faturamento" },
+  { href: "/dashboard/movimento",   label: "Movimento" },
+];
+
 function DashboardHeader() {
   const pathname = usePathname();
   const router = useRouter();
@@ -112,7 +117,8 @@ function DashboardHeader() {
   function handleTabChange(tab: TabKey) {
     const params = new URLSearchParams(searchParams.toString());
     params.set("tab", tab);
-    router.push(`${pathname}?${params.toString()}`);
+    // Sempre navega para /dashboard independente da rota atual
+    router.push(`/dashboard?${params.toString()}`);
   }
 
   return (
@@ -214,8 +220,26 @@ function DashboardHeader() {
             onClick={() => handleTabChange(key)}
             className={cn(
               "px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
-              activeTab === key
+              pathname === "/dashboard" && activeTab === key
                 ? "bg-[#3B82F6] text-white shadow-sm"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+            )}
+          >
+            {label}
+          </button>
+        ))}
+
+        <div className="w-px h-4 bg-[#E5E7EB] mx-1" />
+
+        {PAGE_TABS.map(({ href, label }) => (
+          <button
+            key={href}
+            type="button"
+            onClick={() => router.push(href)}
+            className={cn(
+              "px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
+              pathname === href
+                ? "bg-[#10B981] text-white shadow-sm"
                 : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
             )}
           >
