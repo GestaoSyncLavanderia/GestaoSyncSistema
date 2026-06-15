@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
-// "YYYY-MM-DD" (Brazil date) → UTC range covering that full Brazil day
+// "YYYY-MM-DD" (Brazil date) → UTC range alinhada com SisLav
+// SisLav inicia o "dia" às 01:00 BRT = 04:00 UTC (não à meia-noite BRT)
 function toUtcRange(from: string, to: string) {
-  const gte = new Date(from + "T03:00:00.000Z");
-  const lt  = new Date(to   + "T03:00:00.000Z");
+  const gte = new Date(from + "T04:00:00.000Z");
+  const lt  = new Date(to   + "T04:00:00.000Z");
   lt.setUTCDate(lt.getUTCDate() + 1);
   return { gte, lt };
 }
