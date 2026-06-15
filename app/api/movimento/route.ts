@@ -15,9 +15,11 @@ export async function GET(req: NextRequest) {
   const to   = searchParams.get("to")   ?? new Date().toISOString().slice(0, 10);
   const { gte, lt } = toUtcRange(from, to);
 
-  // paidValue de vendas Concluído — espelha aba Vendas do SisLav
-  // SisLav exclui "Em uso" (em andamento) dos totais
-  const saleWhere = { date: { gte, lt }, status: { not: "Em uso" } };
+  // paidValue de todas as vendas (sem filtro de status).
+  // Pagamentos diretos "Em uso" já têm o dinheiro recebido → incluídos.
+  // Pagamentos BALANCE "Em uso" têm paidValue=0 → não afetam o total.
+  // Espelha aba Vendas do SisLav.
+  const saleWhere = { date: { gte, lt } };
 
   const [agg, byLaundryRaw, dailyRaw] = await Promise.all([
     db.sale.aggregate({
@@ -39,7 +41,6 @@ export async function GET(req: NextRequest) {
         COUNT(*)::int8                                  AS count
       FROM "Sale" s
       WHERE s.date >= ${gte} AND s.date < ${lt}
-        AND s.status <> 'Em uso'
       GROUP BY DATE(s.date AT TIME ZONE 'America/Sao_Paulo')
       ORDER BY sale_date ASC
     `,
