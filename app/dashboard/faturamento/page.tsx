@@ -83,13 +83,13 @@ function FaturamentoContent() {
           icon={TrendingUp}
           label="Faturamento recebido"
           value={loading ? "..." : formatCurrency(data?.total ?? 0)}
-          sub="paidValue acumulado no período"
+          sub="totalValue acumulado no período"
         />
         <KpiCard
           icon={Repeat}
           label="Total de vendas"
           value={loading ? "..." : String(data?.count ?? 0)}
-          sub="incluindo ciclos em andamento"
+          sub="transações (≠ ciclos de máquina)"
         />
         <KpiCard
           icon={Tag}
