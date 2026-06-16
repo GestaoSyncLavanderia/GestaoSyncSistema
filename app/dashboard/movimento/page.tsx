@@ -169,7 +169,7 @@ function MovimentoContent() {
                       <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
                       <Tooltip formatter={(v) => [formatCurrency(Number(v ?? 0)), "Movimento"]} />
                       <Bar dataKey="total" fill="#F59E0B" radius={[0, 5, 5, 0]}>
-                        <LabelList dataKey="total" position="right" formatter={(v: number) => formatCurrency(v)} style={{ fontSize: 11, fill: "#374151", fontWeight: 600 }} />
+                        <LabelList dataKey="total" position="right" formatter={(v: unknown) => formatCurrency(Number(v ?? 0))} style={{ fontSize: 11, fill: "#374151", fontWeight: 600 }} />
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
