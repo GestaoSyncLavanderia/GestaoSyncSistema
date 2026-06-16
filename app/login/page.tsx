@@ -29,7 +29,7 @@ export default function LoginPage() {
     if (result?.error) {
       setError("Email ou senha incorretos. Tente novamente.");
     } else {
-      router.push("/dashboard");
+      router.push("/dashboard/faturamento");
     }
   }
 
