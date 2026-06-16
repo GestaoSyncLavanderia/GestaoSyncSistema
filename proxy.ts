@@ -20,7 +20,12 @@ export default auth((req) => {
   }
 
   if (isLoginPage && isLoggedIn) {
-    return NextResponse.redirect(new URL("/dashboard", req.url));
+    return NextResponse.redirect(new URL("/dashboard/faturamento", req.url));
+  }
+
+  // /dashboard sem ?tab= redireciona para faturamento
+  if (pathname === "/dashboard" && !req.nextUrl.searchParams.has("tab")) {
+    return NextResponse.redirect(new URL("/dashboard/faturamento", req.url));
   }
 
   return NextResponse.next();
