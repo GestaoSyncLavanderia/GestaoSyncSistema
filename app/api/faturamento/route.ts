@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
   await Promise.all(
     [...offsetGroups.entries()].map(async ([offset, ids]) => {
       const { gte, lt } = shiftRange(baseGte, baseLt, offset);
-      const directWhere   = { laundryId: { in: ids }, date: { gte, lt }, serviceType: "SALE",            NOT: { paymentMethod: "BALANCE" } } as const;
+      const directWhere   = { laundryId: { in: ids }, date: { gte, lt }, serviceType: "SALE", NOT: { paymentMethod: { in: ["BALANCE", "SISLAV_PAY"] } } };
       const rechargeWhere = { laundryId: { in: ids }, date: { gte, lt }, serviceType: "BALANCE_PURCHASE" } as const;
       const bsIds = ids.filter((id) => balanceSaleSet.has(id));
 
