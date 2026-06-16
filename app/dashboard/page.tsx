@@ -17,7 +17,7 @@ import { parsePeriod, getPeriodDates } from "@/lib/period";
 
 // ── Tab config ─────────────────────────────────────────────────────────────
 
-type TabKey = "general" | "sales" | "cycles" | "machines" | "units" | "duplicates";
+type TabKey = "sales" | "cycles" | "machines" | "units" | "duplicates";
 
 // ── Shared types ───────────────────────────────────────────────────────────
 
@@ -1090,15 +1090,12 @@ function GeneralTabContent({ from, to, period }: { from: string; to: string; per
 function DashboardContent() {
   const searchParams = useSearchParams();
 
-  const activeTab = (searchParams.get("tab") as TabKey) ?? "general";
+  const activeTab = (searchParams.get("tab") as TabKey) ?? "sales";
   const period = parsePeriod(searchParams.get("period"));
   const { from, to } = getPeriodDates(period);
 
   return (
     <div className="space-y-2">
-
-      {/* Geral */}
-      {activeTab === "general" && <GeneralTabContent from={from} to={to} period={period} />}
 
       {/* Vendas */}
       {activeTab === "sales" && <SalesTabContent from={from} to={to} />}

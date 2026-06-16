@@ -15,55 +15,92 @@ export async function GET(req: NextRequest) {
   const to   = searchParams.get("to")   ?? new Date().toISOString().slice(0, 10);
   const { gte, lt } = toUtcRange(from, to);
 
-  // paidValue de todas as vendas (sem filtro de status).
-  // Pagamentos diretos "Em uso" já têm o dinheiro recebido → incluídos.
-  // Pagamentos BALANCE "Em uso" têm paidValue=0 → não afetam o total.
-  // Espelha aba Vendas do SisLav.
-  const saleWhere = { date: { gte, lt } };
+  // Busca todas as unidades com flag de BALANCE SALE in Vendas
+  const allLaundries = await db.laundry.findMany({
+    select: { id: true, name: true, city: true, state: true, street: true, neighborhood: true, ownerName: true, balanceSaleInVendas: true },
+  });
+  const balanceSaleIds = allLaundries.filter((l) => l.balanceSaleInVendas).map((l) => l.id);
 
-  const [agg, byLaundryRaw, dailyRaw] = await Promise.all([
-    db.sale.aggregate({
-      where: saleWhere,
-      _sum: { paidValue: true },
-      _count: { _all: true },
-    }),
-    db.sale.groupBy({
-      by: ["laundryId"],
-      where: saleWhere,
-      _sum: { paidValue: true },
-      _count: { _all: true },
-      orderBy: { _sum: { paidValue: "desc" } },
-    }),
+  // Espelha aba Vendas do SisLav:
+  // = paidValue de SALEs não-BALANCE + paidValue de BALANCE_PURCHASE
+  // Para unidades com balanceSaleInVendas=true, soma também totalValue dos SALEs BALANCE
+  // (cliente usou saldo carregado em período anterior, sem recarga correspondente no mesmo dia).
+  const directWhere   = { date: { gte, lt }, serviceType: "SALE",            NOT: { paymentMethod: "BALANCE" } } as const;
+  const rechargeWhere = { date: { gte, lt }, serviceType: "BALANCE_PURCHASE" } as const;
+  const cycleWhere    = { date: { gte, lt }, serviceType: "SALE" } as const;
+
+  const [
+    directAgg,
+    rechargeAgg,
+    cycleCountAgg,
+    directByLaundry,
+    rechargeByLaundry,
+    cycleByLaundry,
+    dailyRaw,
+    balanceSaleByLaundry,
+  ] = await Promise.all([
+    db.sale.aggregate({ where: directWhere,   _sum: { paidValue: true } }),
+    db.sale.aggregate({ where: rechargeWhere, _sum: { paidValue: true } }),
+    db.sale.aggregate({ where: cycleWhere,    _count: { _all: true } }),
+    db.sale.groupBy({ by: ["laundryId"], where: directWhere,   _sum: { paidValue: true } }),
+    db.sale.groupBy({ by: ["laundryId"], where: rechargeWhere, _sum: { paidValue: true } }),
+    db.sale.groupBy({ by: ["laundryId"], where: cycleWhere,    _count: { _all: true } }),
     db.$queryRaw<Array<{ sale_date: Date; total: number; count: bigint }>>`
       SELECT
         DATE(s.date AT TIME ZONE 'America/Sao_Paulo') AS sale_date,
-        COALESCE(SUM(s."paidValue"), 0)::float8        AS total,
-        COUNT(*)::int8                                  AS count
+        COALESCE(SUM(
+          CASE
+            WHEN s."serviceType" = 'SALE' AND s."paymentMethod" != 'BALANCE' THEN s."paidValue"
+            WHEN s."serviceType" = 'BALANCE_PURCHASE' THEN s."paidValue"
+            ELSE 0
+          END
+        ), 0)::float8 AS total,
+        COUNT(CASE WHEN s."serviceType" = 'SALE' THEN 1 END)::int8 AS count
       FROM "Sale" s
       WHERE s.date >= ${gte} AND s.date < ${lt}
+        AND (s."serviceType" = 'SALE' OR s."serviceType" = 'BALANCE_PURCHASE')
       GROUP BY DATE(s.date AT TIME ZONE 'America/Sao_Paulo')
       ORDER BY sale_date ASC
     `,
+    balanceSaleIds.length > 0
+      ? db.sale.groupBy({
+          by: ["laundryId"],
+          where: { date: { gte, lt }, serviceType: "SALE", paymentMethod: "BALANCE", laundryId: { in: balanceSaleIds } },
+          _sum: { totalValue: true },
+        })
+      : Promise.resolve([] as Array<{ laundryId: string; _sum: { totalValue: number | null } }>),
   ]);
 
-  const laundryIds = byLaundryRaw.map((r) => r.laundryId);
-  const laundries =
-    laundryIds.length > 0
-      ? await db.laundry.findMany({
-          where: { id: { in: laundryIds } },
-          select: { id: true, name: true, city: true, state: true, street: true, neighborhood: true, ownerName: true },
-        })
-      : [];
-  const laundryMap = Object.fromEntries(laundries.map((l) => [l.id, l]));
+  const rechargeMap   = Object.fromEntries(rechargeByLaundry.map((r) => [r.laundryId, r._sum.paidValue ?? 0]));
+  const balanceSaleMap = Object.fromEntries(balanceSaleByLaundry.map((r) => [r.laundryId, r._sum.totalValue ?? 0]));
+  const cycleCountMap = Object.fromEntries(cycleByLaundry.map((r) => [r.laundryId, r._count._all]));
 
-  const total       = agg._sum.paidValue ?? 0;
-  const count       = agg._count._all;
+  const allLaundryIds = [
+    ...new Set([
+      ...directByLaundry.map((r) => r.laundryId),
+      ...rechargeByLaundry.map((r) => r.laundryId),
+      ...balanceSaleByLaundry.map((r) => r.laundryId),
+    ]),
+  ];
+  const directMap = Object.fromEntries(directByLaundry.map((r) => [r.laundryId, r._sum.paidValue ?? 0]));
+
+  const byLaundryMerged = allLaundryIds
+    .map((id) => ({
+      laundryId: id,
+      total:     (directMap[id] ?? 0) + (rechargeMap[id] ?? 0) + (balanceSaleMap[id] ?? 0),
+      count:     cycleCountMap[id] ?? 0,
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  const laundryMap = Object.fromEntries(allLaundries.map((l) => [l.id, l]));
+
+  const balanceSaleNetworkTotal = balanceSaleByLaundry.reduce((s, r) => s + (r._sum.totalValue ?? 0), 0);
+  const total       = (directAgg._sum.paidValue ?? 0) + (rechargeAgg._sum.paidValue ?? 0) + balanceSaleNetworkTotal;
+  const count       = cycleCountAgg._count._all;
   const ticketMedio = count > 0 ? total / count : 0;
 
-  const ranking = byLaundryRaw.map((r, i) => {
-    const l         = laundryMap[r.laundryId];
-    const unitTotal = r._sum.paidValue ?? 0;
-    const unitCount = r._count._all;
+  const ranking = byLaundryMerged.map((r, i) => {
+    const l = laundryMap[r.laundryId];
     return {
       position:     i + 1,
       laundryId:    r.laundryId,
@@ -73,9 +110,9 @@ export async function GET(req: NextRequest) {
       street:       l?.street       ?? "",
       neighborhood: l?.neighborhood ?? "",
       ownerName:    l?.ownerName    ?? "",
-      total:        unitTotal,
-      count:        unitCount,
-      ticketMedio:  unitCount > 0 ? unitTotal / unitCount : 0,
+      total:        r.total,
+      count:        r.count,
+      ticketMedio:  r.count > 0 ? r.total / r.count : 0,
     };
   });
 

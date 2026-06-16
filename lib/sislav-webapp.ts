@@ -60,7 +60,7 @@ const PAYMENT_MAP: Record<number, string> = {
   1: "CREDIT",
   2: "DEBIT",
   3: "PIX",
-  7: "BALANCE",
+  7: "SISLAV_PAY", // terminal SisLav Pay — paidAmount=0 mas NÃO é saldo de carteira
 };
 
 // "12/06/2026 12:14" (Brasília, UTC-3) → Date UTC
@@ -150,15 +150,22 @@ export async function fetchSalesFromWebApp(
 
     for (const s of json.sales ?? []) {
       if (!s.id || !s.customer?.id) continue;
+      const raw      = s.payment as number;
+      const usedBal  = s.usedBalance ?? 0;
+      const paidAmt  = s.paidAmount  ?? 0;
+      const totAmt   = s.totalAmount ?? 0;
+      // BALANCE = saldo de carteira consumido sem pagamento direto
+      const isWalletOnly = usedBal > 0 && paidAmt === 0;
       all.push({
         id:            s.id,
         date:          parseWebAppDate(s.date),
         machineType:   MACHINE_TYPE_MAP[s.cycle] ?? "",
         serviceType:   s.type ?? "SALE",
         machines:      Array.isArray(s.machines) ? s.machines : [],
-        paidValue:     s.paidAmount  ?? 0,
-        totalValue:    s.totalAmount ?? 0,
-        paymentMethod: PAYMENT_MAP[s.payment as number] ?? "",
+        // SISLAV_PAY (payment=7): paidAmount=0 mas é cobrado fora da plataforma → usa totalAmount
+        paidValue:     isWalletOnly ? 0 : (paidAmt > 0 ? paidAmt : totAmt),
+        totalValue:    totAmt,
+        paymentMethod: isWalletOnly ? "BALANCE" : (PAYMENT_MAP[raw] ?? `PAY_${raw}`),
         status:        s.status ?? "",
         customer: {
           id:    s.customer.id,

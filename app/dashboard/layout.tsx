@@ -9,11 +9,10 @@ import { OdometerCounter } from "@/components/odometer-counter";
 import { LogOut, Play, Pause } from "lucide-react";
 
 const MONO = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-const CYCLE_ORDER: PeriodKey[] = ["hoje", "semana", "mes", "mes-anterior", "total"];
+const CYCLE_ORDER: PeriodKey[] = ["hoje", "ontem", "semana", "mes", "mes-anterior", "total"];
 
-type TabKey = "general" | "sales" | "cycles" | "machines" | "units" | "duplicates";
+type TabKey = "sales" | "cycles" | "machines" | "units" | "duplicates";
 const TABS_CONFIG: { key: TabKey; label: string }[] = [
-  { key: "general",    label: "Geral" },
   { key: "sales",      label: "Vendas" },
   { key: "cycles",     label: "Ciclos" },
   { key: "machines",   label: "Máquinas" },
@@ -106,7 +105,7 @@ function DashboardHeader() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPlay, period]);
 
-  const activeTab = (searchParams.get("tab") as TabKey) ?? "general";
+  const activeTab = (searchParams.get("tab") as TabKey) ?? "sales";
 
   function handlePeriodChange(next: PeriodKey) {
     const params = new URLSearchParams(searchParams.toString());
@@ -150,7 +149,7 @@ function DashboardHeader() {
                   type="button"
                   onClick={() => handlePeriodChange(p.value)}
                   className={cn(
-                    "rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                    "rounded-md px-2.5 py-0.5 text-[11px] font-medium transition-colors",
                     period === p.value
                       ? "bg-white text-[#3B82F6] shadow-sm border border-[#E5E7EB]"
                       : "text-gray-500 hover:text-gray-700"
@@ -213,15 +212,15 @@ function DashboardHeader() {
       </div>
 
       <div className="flex items-center gap-1 px-4 py-1.5 border-b border-[#E5E7EB] bg-white">
-        {TABS_CONFIG.map(({ key, label }) => (
+        {PAGE_TABS.map(({ href, label }) => (
           <button
-            key={key}
+            key={href}
             type="button"
-            onClick={() => handleTabChange(key)}
+            onClick={() => router.push(`${href}${searchParams.get("period") ? `?period=${searchParams.get("period")}` : ""}`)}
             className={cn(
               "px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
-              pathname === "/dashboard" && activeTab === key
-                ? "bg-[#3B82F6] text-white shadow-sm"
+              pathname === href
+                ? "bg-[#10B981] text-white shadow-sm"
                 : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
             )}
           >
@@ -231,15 +230,15 @@ function DashboardHeader() {
 
         <div className="w-px h-4 bg-[#E5E7EB] mx-1" />
 
-        {PAGE_TABS.map(({ href, label }) => (
+        {TABS_CONFIG.map(({ key, label }) => (
           <button
-            key={href}
+            key={key}
             type="button"
-            onClick={() => router.push(href)}
+            onClick={() => handleTabChange(key)}
             className={cn(
               "px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
-              pathname === href
-                ? "bg-[#10B981] text-white shadow-sm"
+              pathname === "/dashboard" && activeTab === key
+                ? "bg-[#3B82F6] text-white shadow-sm"
                 : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
             )}
           >

@@ -1,4 +1,4 @@
-import { MapPin, Repeat, TrendingUp, Tag } from "lucide-react";
+import { MapPin, Repeat, TrendingUp, Tag, AlertTriangle } from "lucide-react";
 import { formatCurrency } from "@/lib/format";
 
 interface LaundryCardProps {
@@ -9,6 +9,7 @@ interface LaundryCardProps {
   neighborhood: string;
   ownerName: string;
   position: number;
+  syncNote?: string;
   stats: {
     totalPaidValue: number;
     cyclesCount: number;
@@ -24,13 +25,25 @@ export function LaundryCard({
   neighborhood,
   ownerName,
   position,
+  syncNote,
   stats,
 }: LaundryCardProps) {
   return (
     <div className="rounded-[14px] border border-[#E5E7EB] bg-white p-5 space-y-4">
       <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="text-sm font-semibold text-[#111827] leading-tight">{name}</p>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm font-semibold text-[#111827] leading-tight truncate">{name}</p>
+            {syncNote && (
+              <div className="relative group shrink-0">
+                <AlertTriangle size={13} className="text-amber-400 cursor-help" />
+                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
+                  {syncNote}
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full border-4 border-transparent border-t-gray-900" />
+                </div>
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-1 mt-1 text-xs text-[#6B7280]">
             <MapPin size={12} />
             {city}, {state}

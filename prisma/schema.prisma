@@ -20,7 +20,11 @@ model Laundry {
   ownerName      String
   ownerEmail     String
   ownerMobile    String
-  revenueMetric  String   @default("paidValue")
+  revenueMetric           String  @default("paidValue")
+  dayStartMinutes         Int     @default(0)
+  balanceSaleInVendas     Boolean @default(false)
+  balanceSaleInFaturamento Boolean @default(false)
+  syncNote                String?
   createdAt      DateTime
   syncedAt       DateTime @default(now())
 
