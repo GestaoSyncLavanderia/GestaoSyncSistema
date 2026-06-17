@@ -1,14 +1,12 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const CELL_H = 52;
 const CELL_W = 34;
 const COMPACT_H = 48;
 const COMPACT_W = 32;
 
-// Always formats to 7 integer digits so character positions are stable
-// and digit box keys never shift (e.g. "R$ 0.000.000,00").
 function formatFixed(value: number): string {
   const cents = Math.round(value * 100);
   const intPart = Math.floor(cents / 100)
@@ -19,69 +17,78 @@ function formatFixed(value: number): string {
   return `R$ ${withDots},${decPart}`;
 }
 
-function DigitColumn({ digit, animate }: { digit: number; animate: boolean }) {
-  return (
-    <div
-      style={{
-        width: CELL_W,
-        height: CELL_H,
-        overflow: "hidden",
-        background: "#2D5A8E",
-        border: "1px solid #3D6A9E",
-        borderRadius: 6,
-        flexShrink: 0,
-      }}
-    >
-      <div
-        style={{
-          willChange: "transform",
-          transform: `translateY(-${digit * CELL_H}px)`,
-          transition: animate ? "transform 600ms ease-out" : "none",
-        }}
-      >
-        {Array.from({ length: 10 }, (_, i) => (
-          <div
-            key={i}
-            style={{
-              width: CELL_W,
-              height: CELL_H,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#FFFFFF",
-              fontSize: 22,
-              fontWeight: 700,
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            {i}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 interface OdometerCounterProps {
   value: number;
   label: string;
   compact?: boolean;
   fullWidth?: boolean;
+  rateKey?: string; // compartilha taxa entre instâncias com a mesma chave
 }
 
-export function OdometerCounter({ value, label, compact = false, fullWidth = false }: OdometerCounterProps) {
-  const prevRef = useRef<number | null>(null);
-  const animate = prevRef.current !== null;
+export function OdometerCounter({ value, label, compact = false, fullWidth = false, rateKey }: OdometerCounterProps) {
+  const [displayValue, setDisplayValue] = useState(value);
+  const [mounted, setMounted] = useState(false);
 
-  const cellH = compact ? COMPACT_H : CELL_H;
-  const cellW = compact ? COMPACT_W : CELL_W;
+  // Rate estimation
+  const ratePerSecRef    = useRef(0);      // R$/second estimated from observed changes
+  const lastRealValueRef = useRef(value);  // last real value received from API
+  const lastRealTimeRef  = useRef(Date.now());
+
+  const cellH    = compact ? COMPACT_H : CELL_H;
+  const cellW    = compact ? COMPACT_W : CELL_W;
   const fontSize = compact ? 21 : 22;
 
+  // On mount: restore persisted rate (survives page reloads triggered by sync detection)
   useEffect(() => {
-    prevRef.current = value;
-  });
+    try {
+      const stored = localStorage.getItem(`odometer_rate_${rateKey ?? label}`);
+      if (stored) {
+        const { rate, savedAt } = JSON.parse(stored) as { rate: number; savedAt: number };
+        const ageMin = (Date.now() - savedAt) / 60_000;
+        if (ageMin < 90 && rate > 0) ratePerSecRef.current = rate;
+      }
+    } catch {}
+    setMounted(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const chars = formatFixed(value).split("");
+  // React to real value arriving from API
+  useEffect(() => {
+    if (value === lastRealValueRef.current) return;
+
+    const now     = Date.now();
+    const elapsed = (now - lastRealTimeRef.current) / 1000; // seconds
+    const delta   = value - lastRealValueRef.current;
+
+    if (delta > 0 && elapsed > 5) {
+      const rate = delta / elapsed;
+      ratePerSecRef.current = rate;
+      try { localStorage.setItem(`odometer_rate_${rateKey ?? label}`, JSON.stringify({ rate, savedAt: now })); } catch {}
+    } else if (delta <= 0) {
+      ratePerSecRef.current = 0;
+      try { localStorage.removeItem(`odometer_rate_${rateKey ?? label}`); } catch {}
+      setDisplayValue(value);
+    }
+
+    lastRealValueRef.current = value;
+    lastRealTimeRef.current  = now;
+
+    setDisplayValue((prev) => (prev < value ? value : prev));
+  }, [value, label]);
+
+  // Micro-tick: increment displayValue every 15 seconds
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (ratePerSecRef.current <= 0) return;
+      setDisplayValue((prev) => {
+        const ceiling = lastRealValueRef.current + ratePerSecRef.current * 1200;
+        return Math.min(prev + ratePerSecRef.current * 15, ceiling);
+      });
+    }, 15_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const chars = formatFixed(displayValue).split("");
 
   return (
     <div
@@ -89,14 +96,14 @@ export function OdometerCounter({ value, label, compact = false, fullWidth = fal
         background: "#1E3A5F",
         borderRadius: compact ? 8 : 16,
         padding: compact ? "10px 22px" : "24px 32px",
-        flex: (compact && !fullWidth) ? "0 0 auto" : 1,
+        flex: compact && !fullWidth ? "0 0 auto" : 1,
         minWidth: 0,
       }}
     >
       <p
         style={{
           color: "#93C5FD",
-          fontSize: compact ? 11 : 11,
+          fontSize: 11,
           fontWeight: 600,
           letterSpacing: "0.1em",
           textTransform: "uppercase",
@@ -125,7 +132,7 @@ export function OdometerCounter({ value, label, compact = false, fullWidth = fal
                   style={{
                     willChange: "transform",
                     transform: `translateY(-${parseInt(char, 10) * cellH}px)`,
-                    transition: animate ? "transform 600ms ease-out" : "none",
+                    transition: mounted ? "transform 600ms ease-out" : "none",
                   }}
                 >
                   {Array.from({ length: 10 }, (_, idx) => (

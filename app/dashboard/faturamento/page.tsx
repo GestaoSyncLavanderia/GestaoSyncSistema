@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { TrendingUp, Repeat, Tag, BarChart2, LayoutGrid, Store, MapPin, MonitorSmartphone } from "lucide-react";
+import { TrendingUp, Repeat, BarChart2, LayoutGrid, Store, MapPin, MonitorSmartphone } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, LabelList, PieChart, Pie, Cell,
   Tooltip, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Legend,
@@ -92,9 +92,8 @@ function FaturamentoContent() {
     total: d.total,
   }));
 
-  const top5    = (data?.ranking ?? []).slice(0, 5);
-  const maxTop5 = top5[0]?.total ?? 1;
-  const sorted  = data?.ranking ?? [];
+  const top5   = (data?.ranking ?? []).slice(0, 5);
+  const sorted = data?.ranking ?? [];
 
   return (
     <div className="space-y-3">
@@ -129,16 +128,11 @@ function FaturamentoContent() {
       {view === "relatorios" ? (
         <>
           {/* ── KPIs ───────────────────────────────────────── */}
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <KpiBlock icon={TrendingUp} label="Faturamento recebido" color="#3B82F6"
-              value={loading ? "..." : formatCurrency(data?.total ?? 0)}
-              sub="paidValue acumulado no período" />
+              value={loading ? "..." : formatCurrency(data?.total ?? 0)} />
             <KpiBlock icon={Repeat} label="Total de vendas" color="#10B981"
-              value={loading ? "..." : String(data?.count ?? 0)}
-              sub="transações (≠ ciclos de máquina)" />
-            <KpiBlock icon={Tag} label="Ticket médio" color="#F59E0B"
-              value={loading ? "..." : formatCurrency(data?.ticketMedio ?? 0)}
-              sub="por venda" />
+              value={loading ? "..." : String(data?.count ?? 0)} />
             <KpiBlock icon={Store} label="Melhor unidade" color="#8B5CF6"
               value={loading ? "..." : (top5[0] ? shortName(top5[0].name) : "—")}
               sub={top5[0] ? formatCurrency(top5[0].total) : undefined} />
@@ -214,8 +208,8 @@ function FaturamentoContent() {
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-sm font-semibold text-[#3B82F6]">{unit.count} vendas</p>
-                        <p className="text-[11px] text-gray-400">ticket {formatCurrency(unit.ticketMedio)}</p>
+                        <p className="text-sm font-semibold text-[#3B82F6]">{formatCurrency(unit.total)}</p>
+                        <p className="text-[11px] text-gray-400">{unit.count} vendas</p>
                       </div>
                     </div>
                   ))}
@@ -266,22 +260,33 @@ function FaturamentoContent() {
               )}
             </div>
 
-            {/* Ticket médio por unidade */}
+            {/* Faturamento por estado */}
             <div className="rounded-xl border border-[#E5E7EB] bg-white p-4">
-              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Ticket médio por unidade</p>
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Faturamento por estado</p>
               {(() => {
-                const byTicket = [...sorted].sort((a, b) => b.ticketMedio - a.ticketMedio);
-                const maxTicket = byTicket[0]?.ticketMedio ?? 1;
+                const byState = Object.values(
+                  (data?.ranking ?? []).reduce((acc, unit) => {
+                    const st = unit.state || "—";
+                    if (!acc[st]) acc[st] = { state: st, total: 0, units: 0 };
+                    acc[st].total  += unit.total;
+                    acc[st].units  += 1;
+                    return acc;
+                  }, {} as Record<string, { state: string; total: number; units: number }>)
+                ).sort((a, b) => b.total - a.total);
+                const maxTotal = byState[0]?.total ?? 1;
                 return (
-                  <div className="space-y-2 overflow-y-auto" style={{ maxHeight: 196 }}>
-                    {byTicket.map((unit) => (
-                      <div key={unit.laundryId}>
-                        <div className="flex items-center justify-between mb-0.5">
-                          <span className="text-[11px] text-gray-700 truncate flex-1">{shortName(unit.name)}</span>
-                          <span className="text-[11px] font-semibold text-[#8B5CF6] ml-2 shrink-0">{formatCurrency(unit.ticketMedio)}</span>
+                  <div className="space-y-2.5 overflow-y-auto" style={{ maxHeight: 196 }}>
+                    {byState.map((row) => (
+                      <div key={row.state}>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-[12px] font-bold text-gray-800 shrink-0">{row.state}</span>
+                            <span className="text-[10px] text-gray-400 shrink-0">{row.units} {row.units === 1 ? "unidade" : "unidades"}</span>
+                          </div>
+                          <span className="text-[11px] font-semibold text-[#3B82F6] ml-2 shrink-0">{formatCurrency(row.total)}</span>
                         </div>
                         <div className="h-1.5 w-full rounded-full bg-[#F3F4F6]">
-                          <div className="h-full rounded-full bg-[#8B5CF6] transition-all duration-500" style={{ width: `${(unit.ticketMedio / maxTicket) * 100}%` }} />
+                          <div className="h-full rounded-full bg-[#3B82F6] transition-all duration-500" style={{ width: `${(row.total / maxTotal) * 100}%` }} />
                         </div>
                       </div>
                     ))}
