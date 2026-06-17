@@ -127,7 +127,7 @@ export async function syncLaundries() {
     await batch(data, 10, async (l) => {
       await db.laundry.upsert({
         where: { id: l.id },
-        update: { name: l.name, syncedAt: new Date() },
+        update: { name: l.name, organizationId: l.organizationId ?? "", ownerName: l.owner?.name ?? "", ownerEmail: l.owner?.email ?? "", ownerMobile: l.owner?.mobile ?? "", syncedAt: new Date() },
         create: {
           id: l.id,
           name: l.name,
