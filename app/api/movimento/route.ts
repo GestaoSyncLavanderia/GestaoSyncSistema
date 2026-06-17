@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   // = paidValue de SALEs não-BALANCE + paidValue de BALANCE_PURCHASE
   // Para unidades com balanceSaleInVendas=true, soma também totalValue dos SALEs BALANCE
   // (cliente usou saldo carregado em período anterior, sem recarga correspondente no mesmo dia).
-  const directWhere   = { date: { gte, lt }, serviceType: "SALE", NOT: { paymentMethod: { in: ["BALANCE", "SISLAV_PAY"] } } };
+  const directWhere   = { date: { gte, lt }, serviceType: "SALE", NOT: { paymentMethod: { in: ["BALANCE"] } } };
   const rechargeWhere = { date: { gte, lt }, serviceType: "BALANCE_PURCHASE" } as const;
   const cycleWhere    = { date: { gte, lt }, serviceType: "SALE" } as const;
 
