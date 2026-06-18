@@ -357,7 +357,6 @@ function MovimentoContent() {
                 stats={{
                   totalPaidValue: unit.total,
                   cyclesCount: unit.count,
-                  ticketMedio: unit.ticketMedio,
                 }}
               />
             ))}

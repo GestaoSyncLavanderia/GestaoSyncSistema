@@ -1,4 +1,4 @@
-import { MapPin, Repeat, TrendingUp, Tag, AlertTriangle } from "lucide-react";
+import { MapPin, Repeat, TrendingUp, AlertTriangle } from "lucide-react";
 import { formatCurrency } from "@/lib/format";
 
 interface LaundryCardProps {
@@ -13,7 +13,6 @@ interface LaundryCardProps {
   stats: {
     totalPaidValue: number;
     cyclesCount: number;
-    ticketMedio: number;
   };
 }
 
@@ -54,7 +53,7 @@ export function LaundryCard({
         </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 border-t border-[#E5E7EB] pt-4">
+      <div className="grid grid-cols-2 gap-3 border-t border-[#E5E7EB] pt-4">
         <div className="text-center">
           <div className="flex items-center justify-center gap-1 text-xs text-[#6B7280] mb-1">
             <TrendingUp size={11} /> Faturamento
@@ -63,19 +62,11 @@ export function LaundryCard({
             {formatCurrency(stats.totalPaidValue)}
           </p>
         </div>
-        <div className="text-center border-x border-[#E5E7EB]">
+        <div className="text-center border-l border-[#E5E7EB]">
           <div className="flex items-center justify-center gap-1 text-xs text-[#6B7280] mb-1">
             <Repeat size={11} /> Ciclos
           </div>
           <p className="text-sm font-semibold text-[#111827]">{stats.cyclesCount}</p>
-        </div>
-        <div className="text-center">
-          <div className="flex items-center justify-center gap-1 text-xs text-[#6B7280] mb-1">
-            <Tag size={11} /> Ticket
-          </div>
-          <p className="text-sm font-semibold text-[#111827]">
-            {formatCurrency(stats.ticketMedio)}
-          </p>
         </div>
       </div>
 
