@@ -22,32 +22,41 @@ interface OdometerCounterProps {
   label: string;
   compact?: boolean;
   fullWidth?: boolean;
-  rateKey?: string; // compartilha taxa entre instâncias com a mesma chave
+  rateKey?: string;
+  animated?: boolean; // false = atualiza só no sync real, sem micro-tick
+  baseRate?: number;  // R$/s de fallback (ex: total_mensal / seg_decorridos_no_mês)
 }
 
-export function OdometerCounter({ value, label, compact = false, fullWidth = false, rateKey }: OdometerCounterProps) {
+export function OdometerCounter({ value, label, compact = false, fullWidth = false, rateKey, animated = true, baseRate = 0 }: OdometerCounterProps) {
   const [displayValue, setDisplayValue] = useState(value);
   const [mounted, setMounted] = useState(false);
 
-  // Rate estimation
-  const ratePerSecRef    = useRef(0);      // R$/second estimated from observed changes
-  const lastRealValueRef = useRef(value);  // last real value received from API
+  const ratePerSecRef    = useRef(0);
+  const lastRealValueRef = useRef(value);
   const lastRealTimeRef  = useRef(Date.now());
+  const baseRateRef      = useRef(baseRate);
 
   const cellH    = compact ? COMPACT_H : CELL_H;
   const cellW    = compact ? COMPACT_W : CELL_W;
   const fontSize = compact ? 21 : 22;
 
-  // On mount: restore persisted rate (survives page reloads triggered by sync detection)
+  // Keep baseRateRef in sync without re-creating intervals
+  useEffect(() => { baseRateRef.current = baseRate; }, [baseRate]);
+
+  // On mount: restore persisted rate; fall back to baseRate if nothing stored
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(`odometer_rate_${rateKey ?? label}`);
-      if (stored) {
-        const { rate, savedAt } = JSON.parse(stored) as { rate: number; savedAt: number };
-        const ageMin = (Date.now() - savedAt) / 60_000;
-        if (ageMin < 90 && rate > 0) ratePerSecRef.current = rate;
-      }
-    } catch {}
+    if (animated) {
+      let restored = 0;
+      try {
+        const stored = localStorage.getItem(`odometer_rate_${rateKey ?? label}`);
+        if (stored) {
+          const { rate, savedAt } = JSON.parse(stored) as { rate: number; savedAt: number };
+          const ageMin = (Date.now() - savedAt) / 60_000;
+          if (ageMin < 90 && rate > 0) restored = rate;
+        }
+      } catch {}
+      ratePerSecRef.current = restored > 0 ? restored : baseRateRef.current;
+    }
     setMounted(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -57,7 +66,7 @@ export function OdometerCounter({ value, label, compact = false, fullWidth = fal
     if (value === lastRealValueRef.current) return;
 
     const now     = Date.now();
-    const elapsed = (now - lastRealTimeRef.current) / 1000; // seconds
+    const elapsed = (now - lastRealTimeRef.current) / 1000;
     const delta   = value - lastRealValueRef.current;
 
     if (delta > 0 && elapsed > 5) {
@@ -65,7 +74,7 @@ export function OdometerCounter({ value, label, compact = false, fullWidth = fal
       ratePerSecRef.current = rate;
       try { localStorage.setItem(`odometer_rate_${rateKey ?? label}`, JSON.stringify({ rate, savedAt: now })); } catch {}
     } else if (delta <= 0) {
-      ratePerSecRef.current = 0;
+      ratePerSecRef.current = baseRateRef.current; // não zera — usa média mensal
       try { localStorage.removeItem(`odometer_rate_${rateKey ?? label}`); } catch {}
       setDisplayValue(value);
     }
@@ -76,17 +85,19 @@ export function OdometerCounter({ value, label, compact = false, fullWidth = fal
     setDisplayValue((prev) => (prev < value ? value : prev));
   }, [value, label]);
 
-  // Micro-tick: increment displayValue every 15 seconds
+  // Micro-tick: incrementa a cada 15s usando a melhor taxa disponível
   useEffect(() => {
+    if (!animated) return;
     const id = setInterval(() => {
-      if (ratePerSecRef.current <= 0) return;
+      const rate = ratePerSecRef.current > 0 ? ratePerSecRef.current : baseRateRef.current;
+      if (rate <= 0) return;
       setDisplayValue((prev) => {
-        const ceiling = lastRealValueRef.current + ratePerSecRef.current * 1200;
-        return Math.min(prev + ratePerSecRef.current * 15, ceiling);
+        const ceiling = lastRealValueRef.current + rate * 1200;
+        return Math.min(prev + rate * 15, ceiling);
       });
     }, 15_000);
     return () => clearInterval(id);
-  }, []);
+  }, [animated]);
 
   const chars = formatFixed(displayValue).split("");
 
