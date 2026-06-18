@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { TrendingUp, Repeat, BarChart2, LayoutGrid, Store, MapPin, MonitorSmartphone } from "lucide-react";
+import { TrendingUp, Repeat, BarChart2, LayoutGrid, Store, MapPin, MonitorSmartphone, Users } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, LabelList, PieChart, Pie, Cell,
   Tooltip, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Legend,
@@ -40,6 +40,13 @@ interface FaturamentoData {
 interface DistribEntry { label: string; total: number; count: number; pct: number; }
 interface SalesDistrib { byPayment: DistribEntry[]; byMachineType: DistribEntry[]; }
 
+interface ClientesData {
+  total: number;
+  month: string;
+  year: number;
+  units: Array<{ position: number; laundryId: string; name: string; city: string; state: string; customers: number }>;
+}
+
 type View = "relatorios" | "unidades";
 
 const PAYMENT_COLORS  = ["#10B981", "#8B5CF6", "#F59E0B", "#EF4444", "#06B6D4"];
@@ -71,10 +78,11 @@ function FaturamentoContent() {
   const period = parsePeriod(searchParams.get("period"));
   const { from, to } = getPeriodDates(period);
 
-  const [view, setView]     = useState<View>("relatorios");
-  const [data, setData]     = useState<FaturamentoData | null>(null);
-  const [distrib, setDistrib] = useState<SalesDistrib | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [view, setView]         = useState<View>("relatorios");
+  const [data, setData]         = useState<FaturamentoData | null>(null);
+  const [distrib, setDistrib]   = useState<SalesDistrib | null>(null);
+  const [clientes, setClientes] = useState<ClientesData | null>(null);
+  const [loading, setLoading]   = useState(true);
 
   useEffect(() => {
     setLoading(true);
@@ -87,13 +95,25 @@ function FaturamentoContent() {
     }).finally(() => setLoading(false));
   }, [from, to]);
 
-  const chartData = (data?.dailyEvolution ?? []).map((d) => ({
-    date: d.date.slice(5),
-    total: d.total,
-  }));
+  useEffect(() => {
+    function fetchClientes() {
+      fetch("/api/clientes-ativos", { cache: "no-store" })
+        .then((r) => r.ok ? r.json() : null)
+        .then((d: ClientesData | null) => { if (d) setClientes(d); })
+        .catch(() => {});
+    }
+    fetchClientes();
+    const id = setInterval(fetchClientes, 60_000);
+    return () => clearInterval(id);
+  }, []);
 
-  const top5   = (data?.ranking ?? []).slice(0, 5);
-  const sorted = data?.ranking ?? [];
+  const chartData    = (data?.dailyEvolution ?? []).map((d) => ({ date: d.date.slice(5), total: d.total }));
+  const top5         = (data?.ranking ?? []).slice(0, 5);
+  const sorted       = data?.ranking ?? [];
+  const maxClientes  = clientes?.units[0]?.customers ?? 1;
+  const clientesSub  = clientes
+    ? `${clientes.month.charAt(0).toUpperCase()}${clientes.month.slice(1)} ${clientes.year}`
+    : undefined;
 
   return (
     <div className="space-y-3">
@@ -128,7 +148,7 @@ function FaturamentoContent() {
       {view === "relatorios" ? (
         <>
           {/* ── KPIs ───────────────────────────────────────── */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-4 gap-3">
             <KpiBlock icon={TrendingUp} label="Faturamento recebido" color="#3B82F6"
               value={loading ? "..." : formatCurrency(data?.total ?? 0)} />
             <KpiBlock icon={Repeat} label="Total de vendas" color="#10B981"
@@ -136,17 +156,18 @@ function FaturamentoContent() {
             <KpiBlock icon={Store} label="Melhor unidade" color="#8B5CF6"
               value={loading ? "..." : (top5[0] ? shortName(top5[0].name) : "—")}
               sub={top5[0] ? formatCurrency(top5[0].total) : undefined} />
+            <KpiBlock icon={Users} label="Clientes ativos no mês" color="#10B981"
+              value={clientes ? String(clientes.total) : "..."}
+              sub={clientesSub} />
           </div>
 
           {/* ── Linha principal: evolução + top 5 ──────────── */}
           <div className="grid grid-cols-3 gap-3">
-            {/* Evolução diária ou ranking do dia (col-span-2) */}
             <div className="col-span-2 rounded-xl border border-[#E5E7EB] bg-white p-4">
               <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">
                 {chartData.length <= 1 ? "Faturamento por unidade — hoje" : "Evolução diária"}
               </p>
               {chartData.length <= 1 ? (
-                /* Quando filtro = "hoje": barras horizontais com todas as unidades */
                 sorted.length === 0 ? (
                   <div className="flex items-center justify-center" style={{ height: 390 }}>
                     <span className="text-sm text-gray-400">Sem dados para hoje</span>
@@ -188,7 +209,6 @@ function FaturamentoContent() {
               )}
             </div>
 
-            {/* Top 5 — localidade & ciclos */}
             <div className="rounded-xl border border-[#E5E7EB] bg-white p-4 flex flex-col">
               <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Top 5 — localidade & ciclos</p>
               {loading ? (
@@ -218,9 +238,8 @@ function FaturamentoContent() {
             </div>
           </div>
 
-          {/* ── Linha inferior: distribuições + ranking ──── */}
+          {/* ── Linha inferior: distribuições + clientes por unidade ──── */}
           <div className="grid grid-cols-3 gap-3">
-            {/* Por forma de pagamento */}
             <div className="rounded-xl border border-[#E5E7EB] bg-white p-4">
               <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Por forma de pagamento</p>
               {!distrib?.byPayment?.length ? (
@@ -240,7 +259,6 @@ function FaturamentoContent() {
               )}
             </div>
 
-            {/* Por tipo de máquina */}
             <div className="rounded-xl border border-[#E5E7EB] bg-white p-4">
               <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Por tipo de máquina</p>
               {!distrib?.byMachineType?.length ? (
@@ -260,44 +278,63 @@ function FaturamentoContent() {
               )}
             </div>
 
-            {/* Faturamento por estado */}
+            {/* Clientes ativos por unidade — mês atual, sempre */}
             <div className="rounded-xl border border-[#E5E7EB] bg-white p-4">
-              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Faturamento por estado</p>
-              {(() => {
-                const byState = Object.values(
-                  (data?.ranking ?? []).reduce((acc, unit) => {
-                    const st = unit.state || "—";
-                    if (!acc[st]) acc[st] = { state: st, total: 0, units: 0 };
-                    acc[st].total  += unit.total;
-                    acc[st].units  += 1;
-                    return acc;
-                  }, {} as Record<string, { state: string; total: number; units: number }>)
-                ).sort((a, b) => b.total - a.total);
-                const maxTotal = byState[0]?.total ?? 1;
-                return (
-                  <div className="space-y-2.5 overflow-y-auto" style={{ maxHeight: 196 }}>
-                    {byState.map((row) => (
-                      <div key={row.state}>
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="text-[12px] font-bold text-gray-800 shrink-0">{row.state}</span>
-                            <span className="text-[10px] text-gray-400 shrink-0">{row.units} {row.units === 1 ? "unidade" : "unidades"}</span>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+                  Clientes ativos por unidade — mês
+                </p>
+                <div className="rounded-lg px-3 py-1.5 text-right shrink-0" style={{ background: "#10B98110", border: "1px solid #10B98128" }}>
+                  <p className="text-[8px] font-bold uppercase tracking-widest leading-none mb-0.5" style={{ color: "#10B981" }}>total</p>
+                  <p className="text-[17px] font-bold tabular-nums leading-none" style={{ color: "#059669" }}>
+                    {clientes ? clientes.total.toLocaleString("pt-BR") : "—"}
+                  </p>
+                </div>
+              </div>
+              <div className="overflow-y-auto" style={{ maxHeight: 196 }}>
+                {!clientes ? (
+                  <div className="space-y-3 pt-1">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <div key={i} className="animate-pulse h-9 rounded-lg bg-gray-100" />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="divide-y divide-[#F9FAFB]">
+                    {clientes.units.map((unit) => (
+                      <div key={unit.laundryId} className="flex items-center gap-2.5 py-2">
+                        <span className="text-[10px] font-semibold text-gray-300 w-4 text-right shrink-0 tabular-nums">
+                          {unit.position}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-[12px] font-semibold text-gray-800 truncate leading-tight">
+                                {shortName(unit.name)}
+                              </span>
+                              <span className="text-[9px] font-medium text-gray-400 bg-gray-50 border border-gray-100 rounded px-1.5 py-0.5 shrink-0 leading-none">
+                                {unit.city}
+                              </span>
+                            </div>
+                            <span className="text-[13px] font-bold text-[#10B981] shrink-0 tabular-nums">
+                              {unit.customers}
+                            </span>
                           </div>
-                          <span className="text-[11px] font-semibold text-[#3B82F6] ml-2 shrink-0">{formatCurrency(row.total)}</span>
-                        </div>
-                        <div className="h-1.5 w-full rounded-full bg-[#F3F4F6]">
-                          <div className="h-full rounded-full bg-[#3B82F6] transition-all duration-500" style={{ width: `${(row.total / maxTotal) * 100}%` }} />
+                          <div className="h-1 w-full rounded-full bg-[#F3F4F6]">
+                            <div
+                              className="h-full rounded-full transition-all duration-700"
+                              style={{ width: `${(unit.customers / maxClientes) * 100}%`, background: "linear-gradient(to right, #059669, #10B981)" }}
+                            />
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
-                );
-              })()}
+                )}
+              </div>
             </div>
           </div>
         </>
       ) : (
-        /* ── Unidades view ────────────────────────────────── */
         loading ? (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (

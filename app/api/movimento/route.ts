@@ -27,8 +27,6 @@ export async function GET(req: NextRequest) {
   // (cliente usou saldo carregado em período anterior, sem recarga correspondente no mesmo dia).
   const directWhere   = { date: { gte, lt }, serviceType: "SALE", NOT: { paymentMethod: { in: ["BALANCE"] } } };
   const rechargeWhere = { date: { gte, lt }, serviceType: "BALANCE_PURCHASE" } as const;
-  const cycleWhere    = { date: { gte, lt }, serviceType: "SALE" } as const;
-
   const [
     directAgg,
     rechargeAgg,
@@ -41,10 +39,23 @@ export async function GET(req: NextRequest) {
   ] = await Promise.all([
     db.sale.aggregate({ where: directWhere,   _sum: { paidValue: true } }),
     db.sale.aggregate({ where: rechargeWhere, _sum: { paidValue: true } }),
-    db.sale.aggregate({ where: cycleWhere,    _count: { _all: true } }),
+    // Soma de máquinas rodadas (array machines) = "Ciclos pagos" do SisLav
+    db.$queryRaw<[{ cnt: bigint }]>`
+      SELECT COALESCE(SUM(array_length(machines, 1)), 0)::int8 AS cnt
+      FROM "Sale"
+      WHERE date >= ${gte} AND date < ${lt}
+        AND "serviceType" = 'SALE'
+    `,
     db.sale.groupBy({ by: ["laundryId"], where: directWhere,   _sum: { paidValue: true } }),
     db.sale.groupBy({ by: ["laundryId"], where: rechargeWhere, _sum: { paidValue: true } }),
-    db.sale.groupBy({ by: ["laundryId"], where: cycleWhere,    _count: { _all: true } }),
+    // Por unidade: soma de máquinas rodadas
+    db.$queryRaw<Array<{ laundryId: string; cnt: bigint }>>`
+      SELECT "laundryId", COALESCE(SUM(array_length(machines, 1)), 0)::int8 AS cnt
+      FROM "Sale"
+      WHERE date >= ${gte} AND date < ${lt}
+        AND "serviceType" = 'SALE'
+      GROUP BY "laundryId"
+    `,
     db.$queryRaw<Array<{ sale_date: Date; total: number; count: bigint }>>`
       SELECT
         DATE(s.date AT TIME ZONE 'America/Sao_Paulo') AS sale_date,
@@ -73,13 +84,14 @@ export async function GET(req: NextRequest) {
 
   const rechargeMap   = Object.fromEntries(rechargeByLaundry.map((r) => [r.laundryId, r._sum.paidValue ?? 0]));
   const balanceSaleMap = Object.fromEntries(balanceSaleByLaundry.map((r) => [r.laundryId, r._sum.totalValue ?? 0]));
-  const cycleCountMap = Object.fromEntries(cycleByLaundry.map((r) => [r.laundryId, r._count._all]));
+  const cycleCountMap = Object.fromEntries((cycleByLaundry as Array<{ laundryId: string; cnt: bigint }>).map((r) => [r.laundryId, Number(r.cnt)]));
 
   const allLaundryIds = [
     ...new Set([
       ...directByLaundry.map((r) => r.laundryId),
       ...rechargeByLaundry.map((r) => r.laundryId),
       ...balanceSaleByLaundry.map((r) => r.laundryId),
+      ...(cycleByLaundry as Array<{ laundryId: string; cnt: bigint }>).map((r) => r.laundryId),
     ]),
   ];
   const directMap = Object.fromEntries(directByLaundry.map((r) => [r.laundryId, r._sum.paidValue ?? 0]));
@@ -96,7 +108,7 @@ export async function GET(req: NextRequest) {
 
   const balanceSaleNetworkTotal = balanceSaleByLaundry.reduce((s, r) => s + (r._sum.totalValue ?? 0), 0);
   const total       = (directAgg._sum.paidValue ?? 0) + (rechargeAgg._sum.paidValue ?? 0) + balanceSaleNetworkTotal;
-  const count       = cycleCountAgg._count._all;
+  const count       = Number((cycleCountAgg as unknown as [{ cnt: bigint }])[0]?.cnt ?? 0);
   const ticketMedio = count > 0 ? total / count : 0;
 
   const ranking = byLaundryMerged.map((r, i) => {

@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
       const rechargeWhere = { laundryId: { in: ids }, date: { gte, lt }, serviceType: "BALANCE_PURCHASE" } as const;
       const bsIds = ids.filter((id) => balanceSaleSet.has(id));
 
-      const [directRows, rechargeRows, balanceSaleRows] = await Promise.all([
+      const [directRows, rechargeRows, balanceSaleRows, cycleRows] = await Promise.all([
         db.sale.groupBy({ by: ["laundryId"], where: directWhere,   _sum: { paidValue: true }, _count: { _all: true } }),
         db.sale.groupBy({ by: ["laundryId"], where: rechargeWhere, _sum: { paidValue: true } }),
         // Soma totalValue de ciclos BALANCE apenas nos dias sem BALANCE_PURCHASE naquela unidade.
@@ -71,16 +71,26 @@ export async function GET(req: NextRequest) {
               GROUP BY s."laundryId"
             `
           : Promise.resolve([] as Array<{ laundryId: string; total: number }>),
+        // Conta máquinas rodadas (soma do array machines), espelhando "Ciclos pagos" do SisLav
+        db.$queryRaw<Array<{ laundryId: string; cnt: bigint }>>`
+          SELECT "laundryId", COALESCE(SUM(array_length(machines, 1)), 0)::int8 AS cnt
+          FROM "Sale"
+          WHERE "laundryId" = ANY(${ids}::text[])
+            AND date >= ${gte} AND date < ${lt}
+            AND "serviceType" = 'SALE'
+          GROUP BY "laundryId"
+        `,
       ]);
 
       const rechargeMap    = new Map(rechargeRows.map((r) => [r.laundryId, r._sum.paidValue ?? 0]));
       const balanceSaleMap = new Map((balanceSaleRows as Array<{ laundryId: string; total: number }>).map((r) => [r.laundryId, r.total]));
+      const cycleMap       = new Map((cycleRows as Array<{ laundryId: string; cnt: bigint }>).map((r) => [r.laundryId, Number(r.cnt)]));
 
-      const allIds = [...new Set([...directRows.map((r) => r.laundryId), ...rechargeRows.map((r) => r.laundryId), ...balanceSaleRows.map((r) => r.laundryId)])];
+      const allIds = [...new Set([...directRows.map((r) => r.laundryId), ...rechargeRows.map((r) => r.laundryId), ...balanceSaleRows.map((r) => r.laundryId), ...cycleRows.map((r) => r.laundryId)])];
       for (const id of allIds) {
         const direct  = directRows.find((r) => r.laundryId === id);
         const paid    = (direct?._sum.paidValue ?? 0) + (rechargeMap.get(id) ?? 0) + (balanceSaleMap.get(id) ?? 0);
-        const cnt     = direct?._count._all ?? 0;
+        const cnt     = cycleMap.get(id) ?? 0;
         unitTotals.set(id, { paid, cnt });
         networkTotal += paid;
         networkCount += cnt;
