@@ -17,10 +17,7 @@ function utcEndOfDay(year: number, month: number, day: number) {
   return new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
 }
 
-// Soma faturamento respeitando o revenueMetric de cada unidade — igual à rota /api/laundries.
-// CASE WHEN 'totalValue' → usa totalValue (inclui BALANCE)
-// CASE WHEN 'paidValue'  → usa totalPaidValue
-// default (totalValueNonBalance) → usa totalValue excluindo ciclos BALANCE
+// Soma faturamento pela tabela Cycle, respeitando o revenueMetric de cada unidade.
 async function revenueForPeriod(gte: Date, lte: Date): Promise<number> {
   const rows = await db.$queryRaw<[{ rev: number }]>`
     SELECT COALESCE(SUM(
@@ -28,7 +25,6 @@ async function revenueForPeriod(gte: Date, lte: Date): Promise<number> {
         WHEN 'totalValue' THEN
           CASE WHEN c."machineType" != '' THEN c."totalValue" ELSE 0 END
         WHEN 'paidValue' THEN
-          -- paidValue inclui BALANCE_PURCHASE (machineType='') pois representam dinheiro recebido
           c."totalPaidValue"
         ELSE
           CASE WHEN c."machineType" != '' AND c."paymentMethod" != 'BALANCE' THEN c."totalValue" ELSE 0 END
@@ -47,8 +43,6 @@ export async function GET() {
 
   const todayStart     = utcMidnight(year, month, day);
   const todayEnd       = utcEndOfDay(year, month, day);
-  const yesterdayStart = utcMidnight(year, month, day - 1);
-  const yesterdayEnd   = utcEndOfDay(year, month, day - 1);
   const monthStart     = utcMidnight(year, month, 1);
   const monthEnd       = utcEndOfDay(year, month + 1, 0); // último dia do mês atual
   const yearStart      = utcMidnight(year, 0, 1);

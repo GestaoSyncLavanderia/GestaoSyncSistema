@@ -29,7 +29,6 @@ function DashboardHeader() {
   const [clockTime, setClockTime] = useState("");
   const [fatMensal, setFatMensal] = useState(0);
   const [fatAnual,  setFatAnual]  = useState(0);
-  const [fatMensalBaseRate, setFatMensalBaseRate] = useState(0);
 
   useEffect(() => {
     function fetchData() {
@@ -48,17 +47,8 @@ function DashboardHeader() {
       fetch("/api/kpis", { cache: "no-store" })
         .then((r) => r.json())
         .then((d) => {
-          const mes = d.kpis?.fatMes?.value ?? 0;
-          setFatMensal(mes);
+          setFatMensal(d.kpis?.fatMes?.value ?? 0);
           setFatAnual(d.kpis?.fatAno?.value ?? 0);
-          if (mes > 0) {
-            // Taxa base: total_mensal ÷ segundos decorridos no mês (BRT)
-            const now = new Date();
-            const brt = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
-            const startOfMonth = new Date(brt.getFullYear(), brt.getMonth(), 1);
-            const elapsedSec = Math.max((brt.getTime() - startOfMonth.getTime()) / 1000, 3600);
-            setFatMensalBaseRate(mes / elapsedSec);
-          }
         })
         .catch(() => {});
     }
@@ -203,8 +193,8 @@ function DashboardHeader() {
       </header>
 
       <div className="flex gap-3 px-4 py-2 border-b border-[#E5E7EB]">
-        <OdometerCounter value={fatMensal} label="Faturamento Mensal" compact fullWidth rateKey="rede" baseRate={fatMensalBaseRate} />
-        <OdometerCounter value={fatAnual}  label="Faturamento Anual"  compact fullWidth animated={false} />
+        <OdometerCounter value={fatMensal} label="Faturamento Mensal" compact fullWidth rateKey="rede" />
+        <OdometerCounter value={fatAnual}  label="Faturamento Anual"  compact fullWidth rateKey="anual" />
       </div>
     </>
   );
