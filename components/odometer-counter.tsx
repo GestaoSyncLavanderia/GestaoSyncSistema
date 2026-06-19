@@ -37,7 +37,7 @@ export function OdometerCounter({
 }: OdometerCounterProps) {
   // Chave inclui mês/ano: ao virar o mês, a chave muda e reinicia automaticamente
   const now = new Date();
-  const storageKey = `odometer_v4_${rateKey ?? label}_${now.getFullYear()}_${now.getMonth()}`;
+  const storageKey = `odometer_v5_${rateKey ?? label}_${now.getFullYear()}_${now.getMonth()}`;
 
   // Sempre inicia em 0 para casar com o HTML do SSR.
   // O localStorage é lido no useEffect (cliente apenas) para evitar hydration mismatch:
