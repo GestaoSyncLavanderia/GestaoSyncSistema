@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 
 const CELL_H    = 52;
 const CELL_W    = 34;
@@ -49,30 +50,32 @@ export function OdometerCounter({
     });
   }, []);
 
-  // Dispara animação visual: vai brevemente abaixo e sobe ao valor real
-  const doRoll = (v: number) => {
-    if (v <= 0) return;
-    // 0.1% abaixo (mínimo R$0,01) — suficiente para rolar alguns dígitos
-    const offset = Math.max(0.01, v * 0.001);
-    setDisplayValue(v - offset);
-    // setTimeout(0) = próxima task do event loop = render separado = transição visível
-    setTimeout(() => setDisplayValue(v), 0);
-  };
-
   // Ao chegar novo valor real: anima para o total correto
+  // Dentro do useEffect, React commita o setState antes do rAF disparar — dois renders separados → transição visível
   useEffect(() => {
     if (!animated) {
       setDisplayValue(value);
       return;
     }
-    doRoll(value);
+    if (value <= 0) return;
+    const offset = Math.max(0.01, value * 0.001);
+    setDisplayValue(value - offset);
+    requestAnimationFrame(() => setDisplayValue(value));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, animated]);
 
   // A cada 10s: re-dispara a animação para o display não ficar estático
+  // Dentro do setInterval, React 18 pode batchear os dois setStates numa só tarefa;
+  // flushSync força o primeiro commit síncrono antes do rAF disparar com o valor final.
   useEffect(() => {
     if (!animated) return;
-    const id = setInterval(() => doRoll(valueRef.current), TICK_MS);
+    const id = setInterval(() => {
+      const v = valueRef.current;
+      if (v <= 0) return;
+      const offset = Math.max(0.01, v * 0.001);
+      flushSync(() => setDisplayValue(v - offset));
+      requestAnimationFrame(() => setDisplayValue(v));
+    }, TICK_MS);
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animated]);
