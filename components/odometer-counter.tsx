@@ -58,7 +58,7 @@ export function OdometerCounter({
       return;
     }
     if (value <= 0) return;
-    const offset = Math.max(0.01, value * 0.001);
+    const offset = Math.max(1, value * 0.1);
     setDisplayValue(value - offset);
     requestAnimationFrame(() => setDisplayValue(value));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -72,7 +72,7 @@ export function OdometerCounter({
     const id = setInterval(() => {
       const v = valueRef.current;
       if (v <= 0) return;
-      const offset = Math.max(0.01, v * 0.001);
+      const offset = Math.max(1, v * 0.1);
       flushSync(() => setDisplayValue(v - offset));
       requestAnimationFrame(() => setDisplayValue(v));
     }, TICK_MS);
@@ -127,7 +127,7 @@ export function OdometerCounter({
                   style={{
                     willChange: "transform",
                     transform:  `translateY(-${parseInt(char, 10) * cellH}px)`,
-                    transition: mounted ? "transform 600ms ease-out" : "none",
+                    transition: mounted ? "transform 2000ms ease-in-out" : "none",
                   }}
                 >
                   {Array.from({ length: 10 }, (_, idx) => (
