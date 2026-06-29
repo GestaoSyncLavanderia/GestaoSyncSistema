@@ -71,13 +71,14 @@ export async function GET(req: NextRequest) {
               GROUP BY s."laundryId"
             `
           : Promise.resolve([] as Array<{ laundryId: string; total: number }>),
-        // Conta máquinas rodadas (soma do array machines), espelhando "Ciclos pagos" do SisLav
+        // Conta máquinas rodadas excluindo BALANCE (uso de saldo não é ciclo pago)
         db.$queryRaw<Array<{ laundryId: string; cnt: bigint }>>`
           SELECT "laundryId", COALESCE(SUM(array_length(machines, 1)), 0)::int8 AS cnt
           FROM "Sale"
           WHERE "laundryId" = ANY(${ids}::text[])
             AND date >= ${gte} AND date < ${lt}
             AND "serviceType" = 'SALE'
+            AND "paymentMethod" != 'BALANCE'
           GROUP BY "laundryId"
         `,
       ]);

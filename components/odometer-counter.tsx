@@ -2,17 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 
-const CELL_H     = 52;
-const CELL_W     = 34;
-const COMPACT_H  = 48;
-const COMPACT_W  = 32;
-const TICK_MS    = 15_000; // incremento a cada 15 s
-const ANIM_STEPS = 120;    // 120 × 15 s = 30 min para atingir o alvo (1 ciclo de sync SisLav)
+const CELL_H    = 52;
+const CELL_W    = 34;
+const COMPACT_H = 48;
+const COMPACT_W = 32;
+const TICK_MS   = 10_000;
 
 function formatFixed(value: number): string {
-  const cents    = Math.round(value * 100);
-  const intPart  = Math.floor(cents / 100).toString().padStart(7, "0");
-  const decPart  = (cents % 100).toString().padStart(2, "0");
+  const cents   = Math.round(value * 100);
+  const intPart = Math.floor(cents / 100).toString().padStart(7, "0");
+  const decPart = (cents % 100).toString().padStart(2, "0");
   const withDots = intPart.replace(/(\d)(?=(\d{3})+$)/g, "$1.");
   return `R$ ${withDots},${decPart}`;
 }
@@ -22,9 +21,9 @@ interface OdometerCounterProps {
   label:      string;
   compact?:   boolean;
   fullWidth?: boolean;
-  rateKey?:   string;  // usado como chave de localStorage
+  rateKey?:   string;
   animated?:  boolean;
-  baseRate?:  number;  // mantido para compatibilidade de API, não utilizado
+  baseRate?:  number;
 }
 
 export function OdometerCounter({
@@ -32,105 +31,48 @@ export function OdometerCounter({
   label,
   compact   = false,
   fullWidth = false,
-  rateKey,
   animated  = true,
 }: OdometerCounterProps) {
-  // Chave inclui mês/ano: ao virar o mês, a chave muda e reinicia automaticamente
-  const now = new Date();
-  const storageKey = `odometer_v5_${rateKey ?? label}_${now.getFullYear()}_${now.getMonth()}`;
-
-  // Sempre inicia em 0 para casar com o HTML do SSR.
-  // O localStorage é lido no useEffect (cliente apenas) para evitar hydration mismatch:
-  // o servidor renderiza value=0, o cliente com localStorage renderizaria um valor diferente.
+  // SSR: inicia em 0 para casar com o HTML do servidor
   const [displayValue, setDisplayValue] = useState<number>(0);
-  const [mounted, setMounted] = useState(false);
+  const [mounted, setMounted]           = useState(false);
+  const valueRef = useRef(0);
 
-  // Refs de animação iniciam em 0 — serão ajustados pelo useEffect de restauração
-  const displayRef  = useRef(0);
-  const animFromRef = useRef(0);
-  const animToRef   = useRef(0);
-  const stepRef     = useRef(ANIM_STEPS); // "concluído" para não animar antes de ter dados
-
-  const persist = (display: number, to: number) => {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify({ display, to, savedAt: Date.now() }));
-    } catch {}
-  };
-
-  const applyDisplay = (v: number) => {
-    displayRef.current = v;
-    setDisplayValue(v);
-    if (animated) persist(v, animToRef.current);
-  };
-
-  // Roda uma vez após o mount: restaura localStorage sem transição CSS,
-  // depois habilita as transições no próximo frame pintado (duplo rAF).
   useEffect(() => {
-    if (animated) {
-      try {
-        const raw = localStorage.getItem(storageKey);
-        if (raw) {
-          const { display, to, savedAt } = JSON.parse(raw) as {
-            display: number; to: number; savedAt: number;
-          };
-          const ageMs = Date.now() - savedAt;
-          // Restaura se recente (< 2h) e display está abaixo do alvo salvo
-          if (ageMs < 120 * 60_000 && display > 0 && display <= to) {
-            displayRef.current  = display;
-            animFromRef.current = display;
-            animToRef.current   = display; // atualizado quando value prop chegar
-            setDisplayValue(display);
-          }
-        }
-      } catch {}
-    }
+    valueRef.current = value;
+  }, [value]);
 
-    // Dois rAFs garantem que o estado acima é pintado SEM animação CSS
-    // antes de habilitar a transition — evita o "spin" visual no restore.
+  // Habilita transição CSS após o primeiro paint (evita spin no hydrate)
+  useEffect(() => {
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => { setMounted(true); });
+      requestAnimationFrame(() => setMounted(true));
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reage à chegada de novo valor do sync (via polling a cada 15s no layout)
+  // Dispara animação visual: vai brevemente abaixo e sobe ao valor real
+  const doRoll = (v: number) => {
+    if (v <= 0) return;
+    // 0.1% abaixo (mínimo R$0,01) — suficiente para rolar alguns dígitos
+    const offset = Math.max(0.01, v * 0.001);
+    setDisplayValue(v - offset);
+    // setTimeout(0) = próxima task do event loop = render separado = transição visível
+    setTimeout(() => setDisplayValue(v), 0);
+  };
+
+  // Ao chegar novo valor real: anima para o total correto
   useEffect(() => {
     if (!animated) {
-      applyDisplay(value);
+      setDisplayValue(value);
       return;
     }
-
-    if (value > animToRef.current) {
-      if (animToRef.current === 0) {
-        // Primeira carga sem localStorage válido: começa em 90% do valor real
-        // para que o display já pareça correto E os dígitos fiquem animando subindo.
-        const startFrom = value * 0.9;
-        animFromRef.current = startFrom;
-        animToRef.current   = value;
-        stepRef.current     = 0;
-        applyDisplay(startFrom);
-        return;
-      }
-      // Novo sync com valor maior: anima do display atual até o novo alvo
-      animFromRef.current = displayRef.current;
-      animToRef.current   = value;
-      stepRef.current     = 0;
-    }
-    // Valor menor ou igual: ignora — o display nunca recua.
-    // Virada de mês é tratada pela chave do localStorage incluir mês+ano.
+    doRoll(value);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, animated]);
 
-  // Tick: avança um passo da animação a cada TICK_MS
+  // A cada 10s: re-dispara a animação para o display não ficar estático
   useEffect(() => {
     if (!animated) return;
-    const id = setInterval(() => {
-      if (stepRef.current >= ANIM_STEPS) return; // animação concluída, aguarda próximo sync
-      stepRef.current++;
-      const progress   = stepRef.current / ANIM_STEPS;
-      const newDisplay = animFromRef.current + (animToRef.current - animFromRef.current) * progress;
-      applyDisplay(newDisplay);
-    }, TICK_MS);
+    const id = setInterval(() => doRoll(valueRef.current), TICK_MS);
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animated]);
@@ -152,12 +94,12 @@ export function OdometerCounter({
     >
       <p
         style={{
-          color:          "#93C5FD",
-          fontSize:       11,
-          fontWeight:     600,
-          letterSpacing:  "0.1em",
-          textTransform:  "uppercase",
-          marginBottom:   compact ? 8 : 16,
+          color:         "#93C5FD",
+          fontSize:      11,
+          fontWeight:    600,
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+          marginBottom:  compact ? 8 : 16,
         }}
       >
         {label}
@@ -214,13 +156,13 @@ export function OdometerCounter({
             <span
               key={i}
               style={{
-                color:       "#FFFFFF",
+                color:      "#FFFFFF",
                 fontSize,
-                fontWeight:  700,
-                lineHeight:  `${cellH}px`,
-                display:     "inline-flex",
-                alignItems:  "center",
-                flexShrink:  0,
+                fontWeight: 700,
+                lineHeight: `${cellH}px`,
+                display:    "inline-flex",
+                alignItems: "center",
+                flexShrink: 0,
               }}
             >
               {char}

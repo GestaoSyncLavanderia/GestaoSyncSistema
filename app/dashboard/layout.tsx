@@ -11,6 +11,14 @@ import { LogOut, Play, Pause } from "lucide-react";
 const MONO = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
 const CYCLE_ORDER: PeriodKey[] = ["hoje", "ontem", "semana", "mes", "mes-anterior", "total"];
 
+function brazilToday() {
+  const brt = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  const y = brt.getUTCFullYear();
+  const m = String(brt.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(brt.getUTCDate()).padStart(2, "0");
+  return { today: `${y}-${m}-${d}`, monthStart: `${y}-${m}-01`, yearStart: `${y}-01-01` };
+}
+
 const PAGE_TABS: { href: string; label: string }[] = [
   { href: "/dashboard/faturamento", label: "Faturamento" },
   { href: "/dashboard/movimento",   label: "Movimento" },
@@ -44,11 +52,14 @@ function DashboardHeader() {
           setLastSync(d.lastSync ?? null);
         })
         .catch(() => {});
-      fetch("/api/kpis", { cache: "no-store" })
-        .then((r) => r.json())
-        .then((d) => {
-          setFatMensal(d.kpis?.fatMes?.value ?? 0);
-          setFatAnual(d.kpis?.fatAno?.value ?? 0);
+      const { today, monthStart, yearStart } = brazilToday();
+      Promise.all([
+        fetch(`/api/faturamento?from=${monthStart}&to=${today}`, { cache: "no-store" }).then((r) => r.json()),
+        fetch(`/api/faturamento?from=${yearStart}&to=${today}`,  { cache: "no-store" }).then((r) => r.json()),
+      ])
+        .then(([mes, ano]) => {
+          setFatMensal(mes.total ?? 0);
+          setFatAnual(ano.total  ?? 0);
         })
         .catch(() => {});
     }
