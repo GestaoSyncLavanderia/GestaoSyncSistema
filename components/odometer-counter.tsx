@@ -34,24 +34,25 @@ export function OdometerCounter({
   fullWidth = false,
   animated  = true,
 }: OdometerCounterProps) {
-  // SSR: inicia em 0 para casar com o HTML do servidor
   const [displayValue, setDisplayValue] = useState<number>(0);
+  // mounted: false no SSR, vira true após o primeiro paint (evita transição no hydrate)
   const [mounted, setMounted]           = useState(false);
+  // transitioning: false = sem transição CSS (snap silencioso), true = anima
+  const [transitioning, setTransitioning] = useState(true);
   const valueRef = useRef(0);
 
   useEffect(() => {
     valueRef.current = value;
   }, [value]);
 
-  // Habilita transição CSS após o primeiro paint (evita spin no hydrate)
+  // Habilita mounted após o primeiro paint
   useEffect(() => {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => setMounted(true));
     });
   }, []);
 
-  // Ao chegar novo valor real: anima para o total correto
-  // Dentro do useEffect, React commita o setState antes do rAF disparar — dois renders separados → transição visível
+  // Quando chega novo valor da API: snap silencioso para (v - 10%) → anima subindo até v
   useEffect(() => {
     if (!animated) {
       setDisplayValue(value);
@@ -59,22 +60,38 @@ export function OdometerCounter({
     }
     if (value <= 0) return;
     const offset = Math.max(1, value * 0.1);
+    // Dentro do useEffect os dois setStates são batchiados num único commit (sem transição)
+    setTransitioning(false);
     setDisplayValue(value - offset);
-    requestAnimationFrame(() => setDisplayValue(value));
+    // Duplo rAF: garante que o browser pintou o estado "from" antes de habilitar a transição
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setTransitioning(true);
+        setDisplayValue(value);
+      });
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, animated]);
 
-  // A cada 10s: re-dispara a animação para o display não ficar estático
-  // Dentro do setInterval, React 18 pode batchear os dois setStates numa só tarefa;
-  // flushSync força o primeiro commit síncrono antes do rAF disparar com o valor final.
+  // A cada 10s: re-dispara o mesmo ciclo snap → anima
   useEffect(() => {
     if (!animated) return;
     const id = setInterval(() => {
       const v = valueRef.current;
       if (v <= 0) return;
       const offset = Math.max(1, v * 0.1);
-      flushSync(() => setDisplayValue(v - offset));
-      requestAnimationFrame(() => setDisplayValue(v));
+      // flushSync: commita ambos os setStates síncronamente (snap sem transição)
+      flushSync(() => {
+        setTransitioning(false);
+        setDisplayValue(v - offset);
+      });
+      // Duplo rAF: habilita transição e anima subindo até o valor real
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setTransitioning(true);
+          setDisplayValue(v);
+        });
+      });
     }, TICK_MS);
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -127,7 +144,9 @@ export function OdometerCounter({
                   style={{
                     willChange: "transform",
                     transform:  `translateY(-${parseInt(char, 10) * cellH}px)`,
-                    transition: mounted ? "transform 2000ms ease-in-out" : "none",
+                    // Transição só ativa quando mounted (evita spin no hydrate)
+                    // E quando transitioning=true (evita animar o snap inicial)
+                    transition: (mounted && transitioning) ? "transform 2000ms ease-in-out" : "none",
                   }}
                 >
                   {Array.from({ length: 10 }, (_, idx) => (
