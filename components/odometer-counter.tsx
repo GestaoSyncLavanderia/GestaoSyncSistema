@@ -7,7 +7,7 @@ const CELL_H    = 52;
 const CELL_W    = 34;
 const COMPACT_H = 48;
 const COMPACT_W = 32;
-const TICK_MS   = 10_000;
+const TICK_MS   = 5_000;
 
 function formatFixed(value: number): string {
   const cents   = Math.round(value * 100);
