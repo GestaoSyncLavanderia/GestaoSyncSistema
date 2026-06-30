@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { useEffect, useState } from "react";
 
 const CELL_H    = 52;
 const CELL_W    = 34;
 const COMPACT_H = 48;
 const COMPACT_W = 32;
-const TICK_MS   = 5_000;
 
 function formatFixed(value: number): string {
   const cents   = Math.round(value * 100);
@@ -39,12 +37,6 @@ export function OdometerCounter({
   const [mounted, setMounted]           = useState(false);
   // transitioning: false = sem transição CSS (snap silencioso), true = anima
   const [transitioning, setTransitioning] = useState(true);
-  const valueRef = useRef(0);
-
-  useEffect(() => {
-    valueRef.current = value;
-  }, [value]);
-
   // Habilita mounted após o primeiro paint
   useEffect(() => {
     requestAnimationFrame(() => {
@@ -73,29 +65,6 @@ export function OdometerCounter({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, animated]);
 
-  // A cada 10s: re-dispara o mesmo ciclo snap → anima
-  useEffect(() => {
-    if (!animated) return;
-    const id = setInterval(() => {
-      const v = valueRef.current;
-      if (v <= 0) return;
-      const offset = Math.max(1, v * 0.1);
-      // flushSync: commita ambos os setStates síncronamente (snap sem transição)
-      flushSync(() => {
-        setTransitioning(false);
-        setDisplayValue(v - offset);
-      });
-      // Duplo rAF: habilita transição e anima subindo até o valor real
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          setTransitioning(true);
-          setDisplayValue(v);
-        });
-      });
-    }, TICK_MS);
-    return () => clearInterval(id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [animated]);
 
   const cellH    = compact ? COMPACT_H : CELL_H;
   const cellW    = compact ? COMPACT_W : CELL_W;
