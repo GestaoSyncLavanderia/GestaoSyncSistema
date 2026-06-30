@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const CELL_H    = 52;
 const CELL_W    = 34;
@@ -33,10 +33,10 @@ export function OdometerCounter({
   animated  = true,
 }: OdometerCounterProps) {
   const [displayValue, setDisplayValue] = useState<number>(0);
-  // mounted: false no SSR, vira true após o primeiro paint (evita transição no hydrate)
   const [mounted, setMounted]           = useState(false);
-  // transitioning: false = sem transição CSS (snap silencioso), true = anima
   const [transitioning, setTransitioning] = useState(true);
+  // Guarda o último valor que disparou animação; evita re-animar por drift de float-point
+  const lastAnimatedRef = useRef<number>(-1);
   // Habilita mounted após o primeiro paint
   useEffect(() => {
     requestAnimationFrame(() => {
@@ -51,8 +51,10 @@ export function OdometerCounter({
       return;
     }
     if (value <= 0) return;
+    // Só anima se o valor mudou pelo menos R$ 0,01 em relação à última animação
+    if (Math.abs(value - lastAnimatedRef.current) < 0.01) return;
+    lastAnimatedRef.current = value;
     const offset = Math.max(1, value * 0.1);
-    // Dentro do useEffect os dois setStates são batchiados num único commit (sem transição)
     setTransitioning(false);
     setDisplayValue(value - offset);
     // Duplo rAF: garante que o browser pintou o estado "from" antes de habilitar a transição

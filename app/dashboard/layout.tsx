@@ -6,7 +6,7 @@ import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { PERIODS, parsePeriod, type PeriodKey } from "@/lib/period";
 import { OdometerCounter } from "@/components/odometer-counter";
-import { LogOut, Play, Pause } from "lucide-react";
+import { LogOut, Play, Pause, RefreshCw } from "lucide-react";
 
 const MONO = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
 const CYCLE_ORDER: PeriodKey[] = ["hoje", "ontem", "semana", "mes", "mes-anterior", "total"];
@@ -31,6 +31,7 @@ function DashboardHeader() {
   const period      = parsePeriod(searchParams.get("period"));
 
   const [autoPlay, setAutoPlay] = useState(false);
+  const [syncing,  setSyncing]  = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const prevSyncRef = useRef<string | null>(null);
   const [clockDate, setClockDate] = useState("");
@@ -58,8 +59,9 @@ function DashboardHeader() {
         fetch(`/api/faturamento?from=${yearStart}&to=${today}`,  { cache: "no-store" }).then((r) => r.json()),
       ])
         .then(([mes, ano]) => {
-          setFatMensal(mes.total ?? 0);
-          setFatAnual(ano.total  ?? 0);
+          // Arredonda em centavos para evitar drift de float-point disparar animação
+          setFatMensal(Math.round((mes.total ?? 0) * 100) / 100);
+          setFatAnual(Math.round((ano.total  ?? 0) * 100) / 100);
         })
         .catch(() => {});
     }
@@ -94,6 +96,17 @@ function DashboardHeader() {
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPlay, period]);
+
+  async function handleManualSync() {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await fetch("/api/sync", { method: "POST" });
+      window.location.reload();
+    } catch {
+      setSyncing(false);
+    }
+  }
 
   function handlePeriodChange(next: PeriodKey) {
     const params = new URLSearchParams(searchParams.toString());
@@ -191,6 +204,21 @@ function DashboardHeader() {
               </span>
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={handleManualSync}
+            disabled={syncing}
+            title={syncing ? "Sincronizando..." : "Sincronizar agora"}
+            className={cn(
+              "p-2 rounded-lg border transition-colors",
+              syncing
+                ? "border-[#3B82F6] bg-[#EFF6FF] text-[#3B82F6] cursor-not-allowed"
+                : "border-[#E5E7EB] bg-[#F8FAFC] text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+            )}
+          >
+            <RefreshCw size={16} className={syncing ? "animate-spin" : ""} />
+          </button>
 
           <button
             type="button"
