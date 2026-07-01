@@ -173,7 +173,7 @@ function FaturamentoContent() {
                     <span className="text-sm text-gray-400">Sem dados para hoje</span>
                   </div>
                 ) : (
-                  <ResponsiveContainer width="100%" height={390}>
+                  <ResponsiveContainer width="100%" height={Math.max(390, sorted.length * 28)}>
                     <BarChart
                       layout="vertical"
                       data={sorted.map((u) => ({ name: shortName(u.name), total: u.total, count: u.count }))}
@@ -182,7 +182,7 @@ function FaturamentoContent() {
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
                       <XAxis type="number" tickFormatter={(v) => formatCurrencyK(v)} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                      <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
+                      <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} interval={0} />
                       <Tooltip formatter={(v) => [formatCurrency(Number(v ?? 0)), "Faturamento"]} />
                       <Bar dataKey="total" fill="#3B82F6" radius={[0, 5, 5, 0]}>
                         <LabelList dataKey="total" position="right" formatter={(v: unknown) => formatCurrency(Number(v ?? 0))} style={{ fontSize: 11, fill: "#374151", fontWeight: 600 }} />

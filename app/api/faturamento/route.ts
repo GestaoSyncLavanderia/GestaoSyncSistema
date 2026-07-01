@@ -30,10 +30,10 @@ export async function GET(req: NextRequest) {
   // Agrupa unidades por offset único; registra quais precisam de BALANCE SALE totalValue
   const offsetGroups = new Map<number, string[]>();
   const balanceSaleSet = new Set(allLaundries.filter((l) => l.balanceSaleInFaturamento).map((l) => l.id));
-  // Unidades que excluem BALANCE_PURCHASE imediatamente consumida na íntegra (pass-through)
-  const passthroughExcludeSet = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludePassthroughPurchase")).map((l) => l.id));
-  // Unidades que excluem ciclos BALANCE da contagem (ex: Chapéu do Sol — SisLav não conta esses ciclos)
-  const cycleExcludeBalanceSet = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludeBalanceCycles")).map((l) => l.id));
+  // Unidades que excluem ciclos BALANCE da contagem (SisLav não conta esses ciclos)
+  const cycleExcludeBalanceSet    = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludeBalanceCycles")).map((l) => l.id));
+  // Unidades que excluem ciclos SISLAV_PAY da contagem (SisLav não conta esses ciclos)
+  const cycleExcludeSislavPaySet  = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludeSislavPayCycles")).map((l) => l.id));
   for (const l of allLaundries) {
     const off = l.dayStartMinutes ?? 0;
     if (!offsetGroups.has(off)) offsetGroups.set(off, []);
@@ -48,39 +48,15 @@ export async function GET(req: NextRequest) {
   await Promise.all(
     [...offsetGroups.entries()].map(async ([offset, ids]) => {
       const { gte, lt } = shiftRange(baseGte, baseLt, offset);
-      const directWhere = { laundryId: { in: ids }, date: { gte, lt }, serviceType: "SALE", NOT: { paymentMethod: { in: ["BALANCE"] } } };
+      // SISLAV_PAY é pagamento direto via app SisLav; o Dashboard SisLav não o exibe em Faturamento
+      const directWhere = { laundryId: { in: ids }, date: { gte, lt }, serviceType: "SALE", NOT: { paymentMethod: { in: ["BALANCE", "SISLAV_PAY"] } } };
       const bsIds = ids.filter((id) => balanceSaleSet.has(id));
-      // IDs que excluem recargas pass-through (syncNote contém "excludePassthroughPurchase")
-      const ptExcludeIds  = ids.filter((id) => passthroughExcludeSet.has(id));
-      const ptIncludeIds  = ids.filter((id) => !passthroughExcludeSet.has(id));
+      const excBalCycleIds     = ids.filter((id) => cycleExcludeBalanceSet.has(id));
+      const excSislavCycleIds  = ids.filter((id) => cycleExcludeSislavPaySet.has(id));
 
-      const [directRows, rechargeRowsStd, rechargeRowsPt, balanceSaleRows, cycleRows] = await Promise.all([
+      const [directRows, rechargeRows, balanceSaleRows, cycleRows] = await Promise.all([
         db.sale.groupBy({ by: ["laundryId"], where: directWhere, _sum: { paidValue: true }, _count: { _all: true } }),
-        // Unidades normais: conta todas as BALANCE_PURCHASE
-        ptIncludeIds.length > 0
-          ? db.sale.groupBy({ by: ["laundryId"], where: { laundryId: { in: ptIncludeIds }, date: { gte, lt }, serviceType: "BALANCE_PURCHASE" }, _sum: { paidValue: true } })
-          : Promise.resolve([] as Array<{ laundryId: string; _sum: { paidValue: number | null } }>),
-        // Unidades com flag: exclui recargas imediatamente consumidas na íntegra (pass-through).
-        // Se um BALANCE SALE do mesmo valor ocorreu em até 10 min, SisLav não contabiliza a recarga.
-        ptExcludeIds.length > 0
-          ? db.$queryRaw<Array<{ laundryId: string; total: number }>>`
-              SELECT bp."laundryId", COALESCE(SUM(bp."paidValue"), 0)::float8 AS total
-              FROM "Sale" bp
-              WHERE bp."laundryId" = ANY(${ptExcludeIds}::text[])
-                AND bp.date >= ${gte} AND bp.date < ${lt}
-                AND bp."serviceType" = 'BALANCE_PURCHASE'
-                AND NOT EXISTS (
-                  SELECT 1 FROM "Sale" bs
-                  WHERE bs."laundryId" = bp."laundryId"
-                    AND bs."serviceType" = 'SALE'
-                    AND bs."paymentMethod" = 'BALANCE'
-                    AND bs."totalValue" = bp."paidValue"
-                    AND bs.date >= bp.date
-                    AND bs.date <= bp.date + interval '10 minutes'
-                )
-              GROUP BY bp."laundryId"
-            `
-          : Promise.resolve([] as Array<{ laundryId: string; total: number }>),
+        db.sale.groupBy({ by: ["laundryId"], where: { laundryId: { in: ids }, date: { gte, lt }, serviceType: "BALANCE_PURCHASE" }, _sum: { paidValue: true } }),
         // Soma totalValue de ciclos BALANCE apenas nos dias sem BALANCE_PURCHASE naquela unidade.
         // Evita double-counting quando a carteira é carregada e usada no mesmo dia.
         bsIds.length > 0
@@ -101,31 +77,24 @@ export async function GET(req: NextRequest) {
               GROUP BY s."laundryId"
             `
           : Promise.resolve([] as Array<{ laundryId: string; total: number }>),
-        // Conta máquinas rodadas. Por padrão inclui ciclos BALANCE. Apenas unidades com
-        // syncNote='excludeBalanceCycles' excluem pagamentos BALANCE da contagem.
+        // Ciclos: por padrão conta SALE. Flags por unidade excluem BALANCE ou SISLAV_PAY da contagem.
         db.$queryRaw<Array<{ laundryId: string; cnt: bigint }>>`
           SELECT "laundryId", COALESCE(SUM(array_length(machines, 1)), 0)::int8 AS cnt
           FROM "Sale"
           WHERE "laundryId" = ANY(${ids}::text[])
             AND date >= ${gte} AND date < ${lt}
             AND "serviceType" = 'SALE'
-            AND NOT (
-              "paymentMethod" = 'BALANCE'
-              AND "laundryId" = ANY(${[...cycleExcludeBalanceSet].filter((id) => ids.includes(id))}::text[])
-            )
+            AND NOT ("paymentMethod" = 'BALANCE'    AND "laundryId" = ANY(${excBalCycleIds}::text[]))
+            AND NOT ("paymentMethod" = 'SISLAV_PAY' AND "laundryId" = ANY(${excSislavCycleIds}::text[]))
           GROUP BY "laundryId"
         `,
       ]);
 
-      const rechargeMap    = new Map<string, number>([
-        ...(rechargeRowsStd as Array<{ laundryId: string; _sum: { paidValue: number | null } }>).map((r) => [r.laundryId, r._sum.paidValue ?? 0] as [string, number]),
-        ...(rechargeRowsPt  as Array<{ laundryId: string; total: number }>).map((r) => [r.laundryId, r.total] as [string, number]),
-      ]);
+      const rechargeMap    = new Map(rechargeRows.map((r) => [r.laundryId, r._sum.paidValue ?? 0] as [string, number]));
       const balanceSaleMap = new Map((balanceSaleRows as Array<{ laundryId: string; total: number }>).map((r) => [r.laundryId, r.total]));
       const cycleMap       = new Map((cycleRows as Array<{ laundryId: string; cnt: bigint }>).map((r) => [r.laundryId, Number(r.cnt)]));
 
-      const rechargeIds = [...(rechargeRowsStd as Array<{ laundryId: string }>).map((r) => r.laundryId), ...(rechargeRowsPt as Array<{ laundryId: string }>).map((r) => r.laundryId)];
-      const allIds = [...new Set([...directRows.map((r) => r.laundryId), ...rechargeIds, ...balanceSaleRows.map((r) => r.laundryId), ...cycleRows.map((r) => r.laundryId)])];
+      const allIds = [...new Set([...directRows.map((r) => r.laundryId), ...rechargeRows.map((r) => r.laundryId), ...balanceSaleRows.map((r) => r.laundryId), ...cycleRows.map((r) => r.laundryId)])];
       for (const id of allIds) {
         const direct  = directRows.find((r) => r.laundryId === id);
         const paid    = (direct?._sum.paidValue ?? 0) + (rechargeMap.get(id) ?? 0) + (balanceSaleMap.get(id) ?? 0);
@@ -167,16 +136,16 @@ export async function GET(req: NextRequest) {
       DATE(s.date AT TIME ZONE 'America/Sao_Paulo') AS sale_date,
       COALESCE(SUM(
         CASE
-          WHEN s."serviceType" = 'SALE' AND s."paymentMethod" != 'BALANCE' THEN s."paidValue"
+          WHEN s."serviceType" = 'SALE' AND s."paymentMethod" NOT IN ('BALANCE', 'SISLAV_PAY') THEN s."paidValue"
           WHEN s."serviceType" = 'BALANCE_PURCHASE' THEN s."paidValue"
           ELSE 0
         END
       ), 0)::float8 AS total,
-      COUNT(CASE WHEN s."serviceType" = 'SALE' AND s."paymentMethod" != 'BALANCE' THEN 1 END)::int8 AS count
+      COUNT(CASE WHEN s."serviceType" = 'SALE' AND s."paymentMethod" NOT IN ('BALANCE', 'SISLAV_PAY') THEN 1 END)::int8 AS count
     FROM "Sale" s
     WHERE s.date >= ${baseGte} AND s.date < ${baseLt}
       AND (
-        (s."serviceType" = 'SALE' AND s."paymentMethod" != 'BALANCE')
+        (s."serviceType" = 'SALE' AND s."paymentMethod" NOT IN ('BALANCE', 'SISLAV_PAY'))
         OR s."serviceType" = 'BALANCE_PURCHASE'
       )
     GROUP BY DATE(s.date AT TIME ZONE 'America/Sao_Paulo')
