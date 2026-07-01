@@ -32,6 +32,8 @@ export async function GET(req: NextRequest) {
   const balanceSaleSet = new Set(allLaundries.filter((l) => l.balanceSaleInFaturamento).map((l) => l.id));
   // Unidades que excluem BALANCE_PURCHASE imediatamente consumida na íntegra (pass-through)
   const passthroughExcludeSet = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludePassthroughPurchase")).map((l) => l.id));
+  // Unidades que excluem ciclos BALANCE da contagem (ex: Chapéu do Sol — SisLav não conta esses ciclos)
+  const cycleExcludeBalanceSet = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludeBalanceCycles")).map((l) => l.id));
   for (const l of allLaundries) {
     const off = l.dayStartMinutes ?? 0;
     if (!offsetGroups.has(off)) offsetGroups.set(off, []);
@@ -99,14 +101,18 @@ export async function GET(req: NextRequest) {
               GROUP BY s."laundryId"
             `
           : Promise.resolve([] as Array<{ laundryId: string; total: number }>),
-        // Conta máquinas rodadas excluindo BALANCE (uso de saldo não é ciclo pago)
+        // Conta máquinas rodadas. Por padrão inclui ciclos BALANCE. Apenas unidades com
+        // syncNote='excludeBalanceCycles' excluem pagamentos BALANCE da contagem.
         db.$queryRaw<Array<{ laundryId: string; cnt: bigint }>>`
           SELECT "laundryId", COALESCE(SUM(array_length(machines, 1)), 0)::int8 AS cnt
           FROM "Sale"
           WHERE "laundryId" = ANY(${ids}::text[])
             AND date >= ${gte} AND date < ${lt}
             AND "serviceType" = 'SALE'
-            AND "paymentMethod" != 'BALANCE'
+            AND NOT (
+              "paymentMethod" = 'BALANCE'
+              AND "laundryId" = ANY(${[...cycleExcludeBalanceSet].filter((id) => ids.includes(id))}::text[])
+            )
           GROUP BY "laundryId"
         `,
       ]);
