@@ -30,6 +30,8 @@ export async function GET(req: NextRequest) {
   // Agrupa unidades por offset único; registra quais precisam de BALANCE SALE totalValue
   const offsetGroups = new Map<number, string[]>();
   const balanceSaleSet = new Set(allLaundries.filter((l) => l.balanceSaleInFaturamento).map((l) => l.id));
+  // Unidades que excluem BALANCE_PURCHASE imediatamente consumida na íntegra (pass-through)
+  const passthroughExcludeSet = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludePassthroughPurchase")).map((l) => l.id));
   for (const l of allLaundries) {
     const off = l.dayStartMinutes ?? 0;
     if (!offsetGroups.has(off)) offsetGroups.set(off, []);
@@ -46,29 +48,37 @@ export async function GET(req: NextRequest) {
       const { gte, lt } = shiftRange(baseGte, baseLt, offset);
       const directWhere = { laundryId: { in: ids }, date: { gte, lt }, serviceType: "SALE", NOT: { paymentMethod: { in: ["BALANCE"] } } };
       const bsIds = ids.filter((id) => balanceSaleSet.has(id));
+      // IDs que excluem recargas pass-through (syncNote contém "excludePassthroughPurchase")
+      const ptExcludeIds  = ids.filter((id) => passthroughExcludeSet.has(id));
+      const ptIncludeIds  = ids.filter((id) => !passthroughExcludeSet.has(id));
 
-      const [directRows, rechargeRows, balanceSaleRows, cycleRows] = await Promise.all([
+      const [directRows, rechargeRowsStd, rechargeRowsPt, balanceSaleRows, cycleRows] = await Promise.all([
         db.sale.groupBy({ by: ["laundryId"], where: directWhere, _sum: { paidValue: true }, _count: { _all: true } }),
-        // Exclui recargas imediatamente consumidas na íntegra: se um BALANCE SALE do mesmo valor
-        // ocorreu até 10 min depois, é um pass-through (ex: cliente carregou exato para 3 lavagens).
-        // SisLav não contabiliza esses eventos no faturamento.
-        db.$queryRaw<Array<{ laundryId: string; total: number }>>`
-          SELECT bp."laundryId", COALESCE(SUM(bp."paidValue"), 0)::float8 AS total
-          FROM "Sale" bp
-          WHERE bp."laundryId" = ANY(${ids}::text[])
-            AND bp.date >= ${gte} AND bp.date < ${lt}
-            AND bp."serviceType" = 'BALANCE_PURCHASE'
-            AND NOT EXISTS (
-              SELECT 1 FROM "Sale" bs
-              WHERE bs."laundryId" = bp."laundryId"
-                AND bs."serviceType" = 'SALE'
-                AND bs."paymentMethod" = 'BALANCE'
-                AND bs."totalValue" = bp."paidValue"
-                AND bs.date >= bp.date
-                AND bs.date <= bp.date + interval '10 minutes'
-            )
-          GROUP BY bp."laundryId"
-        `,
+        // Unidades normais: conta todas as BALANCE_PURCHASE
+        ptIncludeIds.length > 0
+          ? db.sale.groupBy({ by: ["laundryId"], where: { laundryId: { in: ptIncludeIds }, date: { gte, lt }, serviceType: "BALANCE_PURCHASE" }, _sum: { paidValue: true } })
+          : Promise.resolve([] as Array<{ laundryId: string; _sum: { paidValue: number | null } }>),
+        // Unidades com flag: exclui recargas imediatamente consumidas na íntegra (pass-through).
+        // Se um BALANCE SALE do mesmo valor ocorreu em até 10 min, SisLav não contabiliza a recarga.
+        ptExcludeIds.length > 0
+          ? db.$queryRaw<Array<{ laundryId: string; total: number }>>`
+              SELECT bp."laundryId", COALESCE(SUM(bp."paidValue"), 0)::float8 AS total
+              FROM "Sale" bp
+              WHERE bp."laundryId" = ANY(${ptExcludeIds}::text[])
+                AND bp.date >= ${gte} AND bp.date < ${lt}
+                AND bp."serviceType" = 'BALANCE_PURCHASE'
+                AND NOT EXISTS (
+                  SELECT 1 FROM "Sale" bs
+                  WHERE bs."laundryId" = bp."laundryId"
+                    AND bs."serviceType" = 'SALE'
+                    AND bs."paymentMethod" = 'BALANCE'
+                    AND bs."totalValue" = bp."paidValue"
+                    AND bs.date >= bp.date
+                    AND bs.date <= bp.date + interval '10 minutes'
+                )
+              GROUP BY bp."laundryId"
+            `
+          : Promise.resolve([] as Array<{ laundryId: string; total: number }>),
         // Soma totalValue de ciclos BALANCE apenas nos dias sem BALANCE_PURCHASE naquela unidade.
         // Evita double-counting quando a carteira é carregada e usada no mesmo dia.
         bsIds.length > 0
@@ -101,11 +111,15 @@ export async function GET(req: NextRequest) {
         `,
       ]);
 
-      const rechargeMap    = new Map((rechargeRows as Array<{ laundryId: string; total: number }>).map((r) => [r.laundryId, r.total]));
+      const rechargeMap    = new Map<string, number>([
+        ...(rechargeRowsStd as Array<{ laundryId: string; _sum: { paidValue: number | null } }>).map((r) => [r.laundryId, r._sum.paidValue ?? 0] as [string, number]),
+        ...(rechargeRowsPt  as Array<{ laundryId: string; total: number }>).map((r) => [r.laundryId, r.total] as [string, number]),
+      ]);
       const balanceSaleMap = new Map((balanceSaleRows as Array<{ laundryId: string; total: number }>).map((r) => [r.laundryId, r.total]));
       const cycleMap       = new Map((cycleRows as Array<{ laundryId: string; cnt: bigint }>).map((r) => [r.laundryId, Number(r.cnt)]));
 
-      const allIds = [...new Set([...directRows.map((r) => r.laundryId), ...(rechargeRows as Array<{ laundryId: string; total: number }>).map((r) => r.laundryId), ...balanceSaleRows.map((r) => r.laundryId), ...cycleRows.map((r) => r.laundryId)])];
+      const rechargeIds = [...(rechargeRowsStd as Array<{ laundryId: string }>).map((r) => r.laundryId), ...(rechargeRowsPt as Array<{ laundryId: string }>).map((r) => r.laundryId)];
+      const allIds = [...new Set([...directRows.map((r) => r.laundryId), ...rechargeIds, ...balanceSaleRows.map((r) => r.laundryId), ...cycleRows.map((r) => r.laundryId)])];
       for (const id of allIds) {
         const direct  = directRows.find((r) => r.laundryId === id);
         const paid    = (direct?._sum.paidValue ?? 0) + (rechargeMap.get(id) ?? 0) + (balanceSaleMap.get(id) ?? 0);
