@@ -24,15 +24,12 @@ export async function GET(req: NextRequest) {
 
   // Busca todas as unidades com seus offsets e flags
   const allLaundries = await db.laundry.findMany({
-    select: { id: true, name: true, city: true, state: true, street: true, neighborhood: true, ownerName: true, dayStartMinutes: true, balanceSaleInFaturamento: true, syncNote: true, revenueMetric: true },
+    select: { id: true, name: true, city: true, state: true, street: true, neighborhood: true, ownerName: true, dayStartMinutes: true, balanceSaleInFaturamento: true, syncNote: true },
   });
 
   // Agrupa unidades por offset único; registra quais precisam de BALANCE SALE totalValue
   const offsetGroups = new Map<number, string[]>();
   const balanceSaleSet = new Set(allLaundries.filter((l) => l.balanceSaleInFaturamento).map((l) => l.id));
-  // Unidades que usam totalValue em vez de paidValue para receita direta (SisLav revenueMetric)
-  const totalValueSet             = new Set(allLaundries.filter((l) => l.revenueMetric === "totalValueNonBalance").map((l) => l.id));
-  // Unidades que excluem ciclos BALANCE da contagem (SisLav não conta esses ciclos)
   const cycleExcludeBalanceSet    = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludeBalanceCycles")).map((l) => l.id));
   // Unidades que excluem ciclos SISLAV_PAY da contagem (SisLav não conta esses ciclos)
   const cycleExcludeSislavPaySet  = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludeSislavPayCycles")).map((l) => l.id));
@@ -51,25 +48,12 @@ export async function GET(req: NextRequest) {
     [...offsetGroups.entries()].map(async ([offset, ids]) => {
       const { gte, lt } = shiftRange(baseGte, baseLt, offset);
       const bsIds = ids.filter((id) => balanceSaleSet.has(id));
-      const tvIds          = ids.filter((id) => totalValueSet.has(id));
       const excBalCycleIds     = ids.filter((id) => cycleExcludeBalanceSet.has(id));
       const excSislavCycleIds  = ids.filter((id) => cycleExcludeSislavPaySet.has(id));
 
       const [directRows, rechargeRows, balanceSaleRows, cycleRows] = await Promise.all([
         // SISLAV_PAY excluído (não aparece no Dashboard SisLav Faturamento).
-        // revenueMetric=totalValueNonBalance → usa totalValue; demais → paidValue.
-        db.$queryRaw<Array<{ laundryId: string; total: number }>>`
-          SELECT "laundryId",
-            COALESCE(SUM(
-              CASE WHEN "laundryId" = ANY(${tvIds}::text[]) THEN "totalValue" ELSE "paidValue" END
-            ), 0)::float8 AS total
-          FROM "Sale"
-          WHERE "laundryId" = ANY(${ids}::text[])
-            AND date >= ${gte} AND date < ${lt}
-            AND "serviceType" = 'SALE'
-            AND "paymentMethod" NOT IN ('BALANCE', 'SISLAV_PAY')
-          GROUP BY "laundryId"
-        `,
+        db.sale.groupBy({ by: ["laundryId"], where: { laundryId: { in: ids }, date: { gte, lt }, serviceType: "SALE", paymentMethod: { notIn: ["BALANCE", "SISLAV_PAY"] } }, _sum: { paidValue: true } }),
         db.sale.groupBy({ by: ["laundryId"], where: { laundryId: { in: ids }, date: { gte, lt }, serviceType: "BALANCE_PURCHASE" }, _sum: { paidValue: true } }),
         // Soma totalValue de ciclos BALANCE apenas nos dias sem BALANCE_PURCHASE naquela unidade.
         // Evita double-counting quando a carteira é carregada e usada no mesmo dia.
@@ -104,12 +88,12 @@ export async function GET(req: NextRequest) {
         `,
       ]);
 
-      const directMap      = new Map((directRows as Array<{ laundryId: string; total: number }>).map((r) => [r.laundryId, r.total]));
+      const directMap      = new Map(directRows.map((r) => [r.laundryId, r._sum.paidValue ?? 0]));
       const rechargeMap    = new Map(rechargeRows.map((r) => [r.laundryId, r._sum.paidValue ?? 0] as [string, number]));
       const balanceSaleMap = new Map((balanceSaleRows as Array<{ laundryId: string; total: number }>).map((r) => [r.laundryId, r.total]));
       const cycleMap       = new Map((cycleRows as Array<{ laundryId: string; cnt: bigint }>).map((r) => [r.laundryId, Number(r.cnt)]));
 
-      const allIds = [...new Set([...directRows.map((r: { laundryId: string }) => r.laundryId), ...rechargeRows.map((r) => r.laundryId), ...balanceSaleRows.map((r: { laundryId: string }) => r.laundryId), ...cycleRows.map((r: { laundryId: string }) => r.laundryId)])];
+      const allIds = [...new Set([...directRows.map((r) => r.laundryId), ...rechargeRows.map((r) => r.laundryId), ...balanceSaleRows.map((r: { laundryId: string }) => r.laundryId), ...cycleRows.map((r: { laundryId: string }) => r.laundryId)])];
       for (const id of allIds) {
         const paid    = (directMap.get(id) ?? 0) + (rechargeMap.get(id) ?? 0) + (balanceSaleMap.get(id) ?? 0);
         const cnt     = cycleMap.get(id) ?? 0;
@@ -145,14 +129,12 @@ export async function GET(req: NextRequest) {
   });
 
   // Evolução diária — usa boundary base (00:00 BRT) para o gráfico de rede
-  const tvAllIds = [...totalValueSet];
   const dailyRaw = await db.$queryRaw<Array<{ sale_date: Date; total: number; count: bigint }>>`
     SELECT
       DATE(s.date AT TIME ZONE 'America/Sao_Paulo') AS sale_date,
       COALESCE(SUM(
         CASE
-          WHEN s."serviceType" = 'SALE' AND s."paymentMethod" NOT IN ('BALANCE', 'SISLAV_PAY')
-            THEN CASE WHEN s."laundryId" = ANY(${tvAllIds}::text[]) THEN s."totalValue" ELSE s."paidValue" END
+          WHEN s."serviceType" = 'SALE' AND s."paymentMethod" NOT IN ('BALANCE', 'SISLAV_PAY') THEN s."paidValue"
           WHEN s."serviceType" = 'BALANCE_PURCHASE' THEN s."paidValue"
           ELSE 0
         END
