@@ -356,6 +356,7 @@ function FaturamentoContent() {
                 ownerName={unit.ownerName}
                 position={unit.position}
                 syncNote={unit.syncNote}
+                period={period}
                 stats={{
                   totalPaidValue: unit.total,
                   cyclesCount: unit.count,
