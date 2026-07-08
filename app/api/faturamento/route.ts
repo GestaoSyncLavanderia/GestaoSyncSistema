@@ -29,10 +29,11 @@ export async function GET(req: NextRequest) {
 
   // Agrupa unidades por offset único; registra quais precisam de BALANCE SALE totalValue
   const offsetGroups = new Map<number, string[]>();
-  const balanceSaleSet = new Set(allLaundries.filter((l) => l.balanceSaleInFaturamento).map((l) => l.id));
-  const cycleExcludeBalanceSet    = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludeBalanceCycles")).map((l) => l.id));
-  // Unidades que excluem ciclos SISLAV_PAY da contagem (SisLav não conta esses ciclos)
-  const cycleExcludeSislavPaySet  = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludeSislavPayCycles")).map((l) => l.id));
+  const balanceSaleSet          = new Set(allLaundries.filter((l) => l.balanceSaleInFaturamento).map((l) => l.id));
+  const cycleExcludeBalanceSet  = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludeBalanceCycles")).map((l) => l.id));
+  const cycleExcludeSislavPaySet = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludeSislavPayCycles")).map((l) => l.id));
+  // Unidades que incluem SISLAV_PAY no faturamento (SisLav mostra esse valor no Dashboard delas)
+  const includeSislavPaySet     = new Set(allLaundries.filter((l) => l.syncNote?.includes("includeSislavPay")).map((l) => l.id));
   for (const l of allLaundries) {
     const off = l.dayStartMinutes ?? 0;
     if (!offsetGroups.has(off)) offsetGroups.set(off, []);
@@ -47,13 +48,22 @@ export async function GET(req: NextRequest) {
   await Promise.all(
     [...offsetGroups.entries()].map(async ([offset, ids]) => {
       const { gte, lt } = shiftRange(baseGte, baseLt, offset);
-      const bsIds = ids.filter((id) => balanceSaleSet.has(id));
+      const bsIds              = ids.filter((id) => balanceSaleSet.has(id));
       const excBalCycleIds     = ids.filter((id) => cycleExcludeBalanceSet.has(id));
       const excSislavCycleIds  = ids.filter((id) => cycleExcludeSislavPaySet.has(id));
+      // Divide ids por política de SISLAV_PAY no faturamento
+      const spIds   = ids.filter((id) =>  includeSislavPaySet.has(id));
+      const noSpIds = ids.filter((id) => !includeSislavPaySet.has(id));
 
-      const [directRows, rechargeRows, balanceSaleRows, cycleRows] = await Promise.all([
-        // SISLAV_PAY excluído (não aparece no Dashboard SisLav Faturamento).
-        db.sale.groupBy({ by: ["laundryId"], where: { laundryId: { in: ids }, date: { gte, lt }, serviceType: "SALE", paymentMethod: { notIn: ["BALANCE", "SISLAV_PAY"] } }, _sum: { paidValue: true } }),
+      const [directRowsBase, directRowsSp, rechargeRows, balanceSaleRows, cycleRows] = await Promise.all([
+        // Padrão: exclui BALANCE e SISLAV_PAY
+        noSpIds.length > 0
+          ? db.sale.groupBy({ by: ["laundryId"], where: { laundryId: { in: noSpIds }, date: { gte, lt }, serviceType: "SALE", paymentMethod: { notIn: ["BALANCE", "SISLAV_PAY"] } }, _sum: { paidValue: true } })
+          : Promise.resolve([]),
+        // includeSislavPay: exclui apenas BALANCE, mantém SISLAV_PAY
+        spIds.length > 0
+          ? db.sale.groupBy({ by: ["laundryId"], where: { laundryId: { in: spIds }, date: { gte, lt }, serviceType: "SALE", paymentMethod: { not: "BALANCE" } }, _sum: { paidValue: true } })
+          : Promise.resolve([]),
         db.sale.groupBy({ by: ["laundryId"], where: { laundryId: { in: ids }, date: { gte, lt }, serviceType: "BALANCE_PURCHASE" }, _sum: { paidValue: true } }),
         // Soma totalValue de ciclos BALANCE apenas nos dias sem BALANCE_PURCHASE naquela unidade.
         // Evita double-counting quando a carteira é carregada e usada no mesmo dia.
@@ -88,6 +98,7 @@ export async function GET(req: NextRequest) {
         `,
       ]);
 
+      const directRows     = [...directRowsBase, ...directRowsSp];
       const directMap      = new Map(directRows.map((r) => [r.laundryId, r._sum.paidValue ?? 0]));
       const rechargeMap    = new Map(rechargeRows.map((r) => [r.laundryId, r._sum.paidValue ?? 0] as [string, number]));
       const balanceSaleMap = new Map((balanceSaleRows as Array<{ laundryId: string; total: number }>).map((r) => [r.laundryId, r.total]));
