@@ -1,7 +1,7 @@
-// Autentica no app web do SisLav (app.sislav.com.br) para obter status e dados
+// Autentica no app web do SisLav (descelava.sislav.com.br) para obter status e dados
 // completos de vendas (paidAmount, totalAmount, usedBalance, type, status).
 
-const WEB_BASE = "https://app.sislav.com.br";
+const WEB_BASE = "https://descelava.sislav.com.br";
 
 let sessionCache: { token: string; exp: number } | null = null;
 
