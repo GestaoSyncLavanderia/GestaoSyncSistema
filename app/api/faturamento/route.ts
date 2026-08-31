@@ -135,7 +135,6 @@ export async function GET(req: NextRequest) {
       total:        r.total,
       count:        r.count,
       ticketMedio:  r.count > 0 ? r.total / r.count : 0,
-      syncNote:     l?.syncNote ?? undefined,
     };
   });
 

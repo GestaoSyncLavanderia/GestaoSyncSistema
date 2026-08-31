@@ -1,6 +1,5 @@
-import { AlertTriangle, MapPin, Repeat, TrendingUp } from "lucide-react";
+import { MapPin, Repeat, TrendingUp } from "lucide-react";
 import { formatCurrency } from "@/lib/format";
-import type { PeriodKey } from "@/lib/period";
 
 interface LaundryCardProps {
   name: string;
@@ -10,8 +9,6 @@ interface LaundryCardProps {
   neighborhood: string;
   ownerName: string;
   position: number;
-  syncNote?: string;
-  period?: PeriodKey;
   stats: {
     totalPaidValue: number;
     cyclesCount: number;
@@ -26,32 +23,14 @@ export function LaundryCard({
   neighborhood,
   ownerName,
   position,
-  syncNote,
-  period,
   stats,
 }: LaundryCardProps) {
-  const showAlert = period === "mes" || period === "mes-anterior";
-  const residualGap = showAlert ? syncNote?.split("|").find((f) => f.startsWith("residualGap:"))?.slice("residualGap:".length) : undefined;
-  const gapNote = showAlert ? syncNote?.split("|").find((f) => f.startsWith("gapNote:"))?.slice("gapNote:".length) : undefined;
-  const alertTooltip = residualGap
-    ? `Gap residual de R$${residualGap} vs SisLav — divergência interna do SisLav que não é possível corrigir pelo nosso lado.`
-    : gapNote ?? null;
-
   return (
     <div className="rounded-[14px] border border-[#E5E7EB] bg-white p-5 space-y-4">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <p className="text-sm font-semibold text-[#111827] leading-tight truncate">{name}</p>
-            {alertTooltip && (
-              <div className="relative group shrink-0">
-                <AlertTriangle size={13} className="text-amber-400 cursor-help" />
-                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
-                  {alertTooltip}
-                  <div className="absolute left-1/2 -translate-x-1/2 top-full border-4 border-transparent border-t-gray-900" />
-                </div>
-              </div>
-            )}
           </div>
           <div className="flex items-center gap-1 mt-1 text-xs text-[#6B7280]">
             <MapPin size={12} />

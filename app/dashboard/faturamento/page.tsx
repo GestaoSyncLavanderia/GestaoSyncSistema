@@ -24,7 +24,6 @@ interface RankingUnit {
   total: number;
   count: number;
   ticketMedio: number;
-  syncNote?: string;
 }
 
 interface DailyPoint { date: string; total: number; count: number; }
@@ -355,8 +354,6 @@ function FaturamentoContent() {
                 neighborhood={unit.neighborhood}
                 ownerName={unit.ownerName}
                 position={unit.position}
-                syncNote={unit.syncNote}
-                period={period}
                 stats={{
                   totalPaidValue: unit.total,
                   cyclesCount: unit.count,
