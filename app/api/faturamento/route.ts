@@ -32,8 +32,13 @@ export async function GET(req: NextRequest) {
   const balanceSaleSet          = new Set(allLaundries.filter((l) => l.balanceSaleInFaturamento).map((l) => l.id));
   const cycleExcludeBalanceSet  = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludeBalanceCycles")).map((l) => l.id));
   const cycleExcludeSislavPaySet = new Set(allLaundries.filter((l) => l.syncNote?.includes("excludeSislavPayCycles")).map((l) => l.id));
-  // Unidades que incluem SISLAV_PAY no faturamento (SisLav mostra esse valor no Dashboard delas)
-  const includeSislavPaySet     = new Set(allLaundries.filter((l) => l.syncNote?.includes("includeSislavPay")).map((l) => l.id));
+  // Unidades que incluem SISLAV_PAY no faturamento (SisLav mostra esse valor no Dashboard delas).
+  // Só se aplica em períodos de mais de 1 dia — em consultas de dia único (hoje/ontem) a
+  // ferramenta de referência exclui SISLAV_PAY, então mantemos o comportamento padrão nesse caso.
+  const isSingleDay            = from === to;
+  const includeSislavPaySet    = new Set(
+    isSingleDay ? [] : allLaundries.filter((l) => l.syncNote?.includes("includeSislavPay")).map((l) => l.id)
+  );
   for (const l of allLaundries) {
     const off = l.dayStartMinutes ?? 0;
     if (!offsetGroups.has(off)) offsetGroups.set(off, []);
