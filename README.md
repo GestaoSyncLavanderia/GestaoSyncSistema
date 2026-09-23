@@ -69,7 +69,17 @@ Para alterar: atualizar o campo `revenueMetric` diretamente no banco via Prisma.
 DATABASE_URL=          # Connection string PostgreSQL (Supabase)
 SISLAV_API_URL=        # Base URL da API Sislav (ex: https://api.sislav.com.br)
 SISLAV_API_KEY=        # Chave de API Sislav
+SYSTEM_LOCKED=         # "true" bloqueia o sistema (tela de indisponibilidade em /bloqueado). Qualquer outro valor/ausente = liberado.
 ```
+
+### Bloqueio geral do sistema (`SYSTEM_LOCKED`)
+
+Para bloquear o acesso de todos os usuários logados (ex: pendência administrativa com o cliente), sem mexer em código:
+
+1. No painel do Vercel, defina a env var `SYSTEM_LOCKED=true` no projeto.
+2. Faça um novo deploy (ou redeploy) para aplicar.
+3. Usuários logados são redirecionados para `/bloqueado`, com uma mensagem neutra ("Sistema temporariamente indisponível... entre em contato com o administrador") e sem acesso ao restante do sistema. A sincronização (`/api/sync`, `/api/cron/sync`) continua rodando normalmente em segundo plano.
+4. Para liberar de novo: mude `SYSTEM_LOCKED` para `false` (ou remova a variável) e faça outro deploy.
 
 ## Desenvolvimento Local
 
