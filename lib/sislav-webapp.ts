@@ -162,8 +162,9 @@ export async function fetchSalesFromWebApp(
         machineType:   MACHINE_TYPE_MAP[s.cycle] ?? "",
         serviceType:   s.type ?? "SALE",
         machines:      Array.isArray(s.machines) ? s.machines : [],
-        // SISLAV_PAY (payment=7): paidAmount=0 mas é cobrado fora da plataforma → usa totalAmount
-        paidValue:     isWalletOnly ? 0 : (paidAmt > 0 ? paidAmt : totAmt),
+        // SISLAV_PAY (payment=7): paidAmount=0 mas é cobrado fora da plataforma → usa totalAmount.
+        // Qualquer outro paidAmount=0 (carteira, voucher/cortesia payment=9, etc.) é receita zero de fato.
+        paidValue:     raw === 7 ? totAmt : paidAmt,
         totalValue:    totAmt,
         paymentMethod: isWalletOnly ? "BALANCE" : (PAYMENT_MAP[raw] ?? `PAY_${raw}`),
         status:        s.status ?? "",
