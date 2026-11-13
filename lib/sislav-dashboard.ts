@@ -227,6 +227,9 @@ export async function loadDashboardDays(
   const records = await fetchDashboardRecords(laundryId, orgId, from, to);
   return [...summarizeByDay(records, timezoneHours)]
     .filter(([day]) => day >= fromDay && day <= toDay)
+    // Dia só com custos lançados não tem receita nem ciclo: não interessa ao Faturamento e faria
+    // uma unidade já fechada, que só recebe lançamentos de custo, aparecer zerada no ranking.
+    .filter(([, totals]) => totals.revenue > 0 || totals.cycles > 0)
     .map(([day, totals]) => ({ day, ...totals }));
 }
 
