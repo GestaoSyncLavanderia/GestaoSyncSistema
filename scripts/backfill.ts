@@ -48,7 +48,9 @@ async function main() {
         // Um mês por vez, para cada resposta do SisLav ficar pequena.
         for (let start = from; start <= today; start = monthBounds(start).next) {
           const { end } = monthBounds(start);
-          days += await syncDashboardDays(l.id, l.organizationId, start, end < today ? end : today, timezoneHours);
+          const month = () => syncDashboardDays(l.id, l.organizationId, start, end < today ? end : today, timezoneHours);
+          // O SisLav falha de vez em quando sem motivo aparente; uma segunda tentativa costuma passar.
+          days += await month().catch(() => sleep(3000).then(month));
           await sleep(200);
         }
         console.log(`ok    ${l.name}: ${days} dias`);

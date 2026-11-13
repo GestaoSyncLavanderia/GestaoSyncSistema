@@ -65,6 +65,8 @@ export async function webAppGet(path: string, orgId?: string): Promise<Response>
       "User-Agent": "Mozilla/5.0",
       Accept:       "application/json, text/plain, */*",
     },
+    // O SisLav às vezes deixa a requisição pendurada por minutos; melhor falhar e tentar de novo.
+    signal: AbortSignal.timeout(60_000),
   });
 
   if (res.status === 401 || res.redirected) {
