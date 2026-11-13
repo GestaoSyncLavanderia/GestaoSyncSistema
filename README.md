@@ -43,7 +43,28 @@ O sistema importa dados via API Sislav de forma incremental. Rotas disponíveis:
 
 > **Limite Vercel Hobby:** todas as rotas de sync têm `maxDuration = 300s`.
 
-## Modelo de Faturamento
+## Faturamento: mesma fonte da aba Dashboard do Sislav
+
+A tela de **Faturamento** lê a tabela `DashboardDay`: um resumo por unidade e por dia, calculado a partir dos mesmos dados e com a mesma fórmula da aba Dashboard do Sislav (`lib/sislav-dashboard.ts`). Não há regra de cálculo por unidade.
+
+- O dia vira no fuso configurado na conta do Sislav usada pelo sync.
+- A receita inclui os lançamentos manuais de receita feitos no Sislav, que não aparecem na lista de vendas.
+- O sync relê os 3 dias mais recentes a cada execução e os últimos 62 dias uma vez por dia.
+
+A tela de **Movimento** continua lendo a tabela `Sale` (lista de vendas do Sislav).
+
+### Recuperação manual de dados
+
+`scripts/backfill.ts` roda na máquina, sem o limite de tempo da Vercel, e pode ser repetido sem duplicar nada:
+
+```bash
+npx tsx scripts/backfill.ts dashboard 2024-04-01   # recalcula o resumo do Dashboard desde a data
+npx tsx scripts/backfill.ts sales 2026-10-06       # reimporta as vendas desde a data
+```
+
+Um terceiro argumento opcional restringe a uma unidade (id).
+
+## Modelo de Faturamento (telas legadas)
 
 Cada venda possui dois campos de valor:
 
