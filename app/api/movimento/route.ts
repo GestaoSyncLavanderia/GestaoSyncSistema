@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   // Para unidades com balanceSaleInVendas=true, soma também totalValue dos SALEs BALANCE
   // (cliente usou saldo carregado em período anterior, sem recarga correspondente no mesmo dia).
   const directWhere   = { date: { gte, lt }, serviceType: "SALE", NOT: { paymentMethod: { in: ["BALANCE"] } } };
-  const rechargeWhere = { date: { gte, lt }, serviceType: "BALANCE_PURCHASE" } as const;
+  const rechargeWhere = { date: { gte, lt }, serviceType: { in: ["BALANCE_PURCHASE", "COMBO_PURCHASE"] as string[] } };
   const [
     directAgg,
     rechargeAgg,
@@ -62,14 +62,14 @@ export async function GET(req: NextRequest) {
         COALESCE(SUM(
           CASE
             WHEN s."serviceType" = 'SALE' AND s."paymentMethod" != 'BALANCE' THEN s."paidValue"
-            WHEN s."serviceType" = 'BALANCE_PURCHASE' THEN s."paidValue"
+            WHEN s."serviceType" IN ('BALANCE_PURCHASE', 'COMBO_PURCHASE') THEN s."paidValue"
             ELSE 0
           END
         ), 0)::float8 AS total,
         COUNT(CASE WHEN s."serviceType" = 'SALE' THEN 1 END)::int8 AS count
       FROM "Sale" s
       WHERE s.date >= ${gte} AND s.date < ${lt}
-        AND (s."serviceType" = 'SALE' OR s."serviceType" = 'BALANCE_PURCHASE')
+        AND (s."serviceType" = 'SALE' OR s."serviceType" IN ('BALANCE_PURCHASE', 'COMBO_PURCHASE'))
       GROUP BY DATE(s.date AT TIME ZONE 'America/Sao_Paulo')
       ORDER BY sale_date ASC
     `,

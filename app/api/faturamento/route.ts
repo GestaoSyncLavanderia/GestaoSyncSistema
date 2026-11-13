@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
         spIds.length > 0
           ? db.sale.groupBy({ by: ["laundryId"], where: { laundryId: { in: spIds }, date: { gte, lt }, serviceType: "SALE", paymentMethod: { not: "BALANCE" } }, _sum: { paidValue: true } })
           : Promise.resolve([]),
-        db.sale.groupBy({ by: ["laundryId"], where: { laundryId: { in: ids }, date: { gte, lt }, serviceType: "BALANCE_PURCHASE" }, _sum: { paidValue: true } }),
+        db.sale.groupBy({ by: ["laundryId"], where: { laundryId: { in: ids }, date: { gte, lt }, serviceType: { in: ["BALANCE_PURCHASE", "COMBO_PURCHASE"] } }, _sum: { paidValue: true } }),
         // Soma totalValue de ciclos BALANCE apenas nos dias sem BALANCE_PURCHASE naquela unidade.
         // Evita double-counting quando a carteira é carregada e usada no mesmo dia.
         bsIds.length > 0
@@ -150,7 +150,7 @@ export async function GET(req: NextRequest) {
       COALESCE(SUM(
         CASE
           WHEN s."serviceType" = 'SALE' AND s."paymentMethod" NOT IN ('BALANCE', 'SISLAV_PAY') THEN s."paidValue"
-          WHEN s."serviceType" = 'BALANCE_PURCHASE' THEN s."paidValue"
+          WHEN s."serviceType" IN ('BALANCE_PURCHASE', 'COMBO_PURCHASE') THEN s."paidValue"
           ELSE 0
         END
       ), 0)::float8 AS total,
@@ -159,7 +159,7 @@ export async function GET(req: NextRequest) {
     WHERE s.date >= ${baseGte} AND s.date < ${baseLt}
       AND (
         (s."serviceType" = 'SALE' AND s."paymentMethod" NOT IN ('BALANCE', 'SISLAV_PAY'))
-        OR s."serviceType" = 'BALANCE_PURCHASE'
+        OR s."serviceType" IN ('BALANCE_PURCHASE', 'COMBO_PURCHASE')
       )
     GROUP BY DATE(s.date AT TIME ZONE 'America/Sao_Paulo')
     ORDER BY sale_date ASC
