@@ -28,9 +28,33 @@ model Laundry {
   createdAt      DateTime
   syncedAt       DateTime @default(now())
 
-  sales     Sale[]
-  cycles    Cycle[]
-  customers CustomerLaundry[]
+  sales         Sale[]
+  cycles        Cycle[]
+  customers     CustomerLaundry[]
+  dashboardDays DashboardDay[]
+}
+
+// Resumo diário da aba Dashboard do SisLav — fonte da tela de Faturamento.
+// Um registro por unidade e por dia, calculado a partir dos mesmos dados e com a mesma
+// fórmula que o SisLav usa (ver lib/sislav-dashboard.ts).
+model DashboardDay {
+  laundryId String
+  // Meia-noite UTC da data do dia no Dashboard (mesma convenção de Cycle.cycleDate)
+  day       DateTime
+  // Receita do dia: vendas, recargas, pacotes e lançamentos manuais de receita
+  revenue   Float
+  // Parte da receita que veio de lançamentos manuais (não existem na lista de vendas)
+  receipts  Float    @default(0)
+  // Ciclos pagos, pela regra do Dashboard
+  cycles    Int
+  // Quantos registros do SisLav compõem o dia
+  records   Int
+  syncedAt  DateTime @default(now())
+
+  laundry Laundry @relation(fields: [laundryId], references: [id])
+
+  @@id([laundryId, day])
+  @@index([day])
 }
 
 model Sale {

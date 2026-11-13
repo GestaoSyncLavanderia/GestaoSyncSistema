@@ -2,6 +2,7 @@ import { db } from "./db";
 import * as api from "./sislav";
 import { parseSislavDate } from "./sislav";
 import { fetchSalesFromWebApp, fetchStatusMap } from "./sislav-webapp";
+import { syncDashboard } from "./sislav-dashboard";
 import { startOfDay, subHours } from "date-fns";
 
 // Retorna o midnight UTC correspondente ao dia de Brasília (UTC-3) do timestamp
@@ -33,6 +34,12 @@ export async function syncAll(): Promise<{
 
   await syncLaundries();
   timing.syncLaundries = Date.now() - t0;
+
+  // Resumo da aba Dashboard do SisLav, que alimenta o Faturamento. Vem antes das vendas porque é
+  // rápido e não pode ficar para trás quando a execução é cortada pelo limite de tempo.
+  const t1 = Date.now();
+  errors.push(...(await syncDashboard()));
+  timing.syncDashboard = Date.now() - t1;
 
   const laundries = await db.laundry.findMany({ select: { id: true, organizationId: true, name: true } });
 

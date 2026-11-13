@@ -48,6 +48,32 @@ async function getSession(): Promise<string> {
   return token;
 }
 
+/**
+ * GET autenticado no web app do SisLav, para endpoints além da lista de vendas.
+ * Em caso de sessão expirada, descarta a sessão em cache para a próxima chamada logar de novo.
+ */
+export async function webAppGet(path: string, orgId?: string): Promise<Response> {
+  if (!process.env.SISLAV_WEB_EMAIL || !process.env.SISLAV_WEB_PASSWORD) {
+    throw new Error("SISLAV_WEB_EMAIL e SISLAV_WEB_PASSWORD não configurados");
+  }
+
+  const token = await getSession();
+  const res = await fetch(`${WEB_BASE}${path}`, {
+    headers: {
+      Cookie:       `authjs.session-token=${token}`,
+      ...(orgId ? { "x-organization-id": orgId } : {}),
+      "User-Agent": "Mozilla/5.0",
+      Accept:       "application/json, text/plain, */*",
+    },
+  });
+
+  if (res.status === 401 || res.redirected) {
+    sessionCache = null;
+    throw new Error("SisLav web sessão expirada (401)");
+  }
+  return res;
+}
+
 // ── Mapeamentos web app → modelo interno ──────────────────────────────────────
 
 const MACHINE_TYPE_MAP: Record<string, string> = {
