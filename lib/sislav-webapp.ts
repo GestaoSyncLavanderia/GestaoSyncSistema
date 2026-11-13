@@ -86,7 +86,9 @@ const PAYMENT_MAP: Record<number, string> = {
   1: "CREDIT",
   2: "DEBIT",
   3: "PIX",
-  7: "SISLAV_PAY", // terminal SisLav Pay — paidAmount=0 mas NÃO é saldo de carteira
+  // 7 é "Carteira" no SisLav. Com saldo usado a venda vira BALANCE (ver isWalletOnly); sem saldo
+  // usado ela mantém o rótulo histórico SISLAV_PAY.
+  7: "SISLAV_PAY",
 };
 
 // "12/06/2026 12:14" (Brasília, UTC-3) → Date UTC
@@ -188,9 +190,11 @@ export async function fetchSalesFromWebApp(
         machineType:   MACHINE_TYPE_MAP[s.cycle] ?? "",
         serviceType:   s.type ?? "SALE",
         machines:      Array.isArray(s.machines) ? s.machines : [],
-        // SISLAV_PAY (payment=7): paidAmount=0 mas é cobrado fora da plataforma → usa totalAmount.
-        // Qualquer outro paidAmount=0 (carteira, voucher/cortesia payment=9, etc.) é receita zero de fato.
-        paidValue:     raw === 7 ? totAmt : paidAmt,
+        // Venda paga só com saldo de carteira não traz dinheiro novo: o dinheiro entrou na recarga.
+        // Fica com valor pago zero, como o próprio SisLav informa (a API oficial também devolve 0).
+        // SISLAV_PAY (payment=7 sem saldo usado): paidAmount=0 mas é cobrado fora da plataforma → usa totalAmount.
+        // Qualquer outro paidAmount=0 (voucher/cortesia payment=9, etc.) é receita zero de fato.
+        paidValue:     raw === 7 && !isWalletOnly ? totAmt : paidAmt,
         totalValue:    totAmt,
         paymentMethod: isWalletOnly ? "BALANCE" : (PAYMENT_MAP[raw] ?? `PAY_${raw}`),
         status:        s.status ?? "",
