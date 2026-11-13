@@ -268,14 +268,17 @@ const PARALLEL_LAUNDRIES = 4;
  */
 export async function syncDashboard(): Promise<string[]> {
   const errors: string[] = [];
+  let wide = false;
 
   try {
     const timezoneHours = await getDashboardTimezone();
+    // Conta a última tentativa, com ou sem erro: uma unidade que falha sempre não deve fazer
+    // toda execução reler o intervalo maior.
     const lastWide = await db.syncLog.findFirst({
-      where: { entity: "dashboard-wide", status: "success" },
+      where: { entity: "dashboard-wide" },
       orderBy: { createdAt: "desc" },
     });
-    const wide = !lastWide || Date.now() - lastWide.createdAt.getTime() > WIDE_EVERY_MS;
+    wide = !lastWide || Date.now() - lastWide.createdAt.getTime() > WIDE_EVERY_MS;
 
     const toDay = dashboardToday(timezoneHours);
     const fromDay = addDays(toDay, -((wide ? WIDE_DAYS : RECENT_DAYS) - 1));
@@ -293,17 +296,18 @@ export async function syncDashboard(): Promise<string[]> {
       );
     }
 
-    if (errors.length === 0) {
-      await db.syncLog.create({ data: { entity: wide ? "dashboard-wide" : "dashboard", status: "success" } });
-    }
   } catch (err: any) {
     errors.push(`dashboard: ${err.message}`);
   }
 
-  if (errors.length > 0) {
-    await db.syncLog
-      .create({ data: { entity: "dashboard", status: "error", message: errors.join(" | ").slice(0, 1000) } })
-      .catch(() => {});
-  }
+  await db.syncLog
+    .create({
+      data: {
+        entity: wide ? "dashboard-wide" : "dashboard",
+        status: errors.length === 0 ? "success" : "error",
+        message: errors.length === 0 ? null : errors.join(" | ").slice(0, 1000),
+      },
+    })
+    .catch(() => {}); // sem banco não há onde registrar; os erros seguem no retorno
   return errors;
 }
