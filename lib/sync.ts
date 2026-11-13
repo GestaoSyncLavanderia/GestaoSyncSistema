@@ -43,42 +43,49 @@ export async function syncAll(): Promise<{
 
   const laundries = await db.laundry.findMany({ select: { id: true, organizationId: true, name: true } });
 
-  const lastLog = await db.syncLog.findFirst({
+  // Sem nenhum sync de vendas registrado (primeira execução, ou depois de /api/sync/reset),
+  // todas as unidades refazem a carga completa.
+  const hasSyncedBefore = !!(await db.syncLog.findFirst({
     where: { entity: "sales", status: "success" },
-    orderBy: { createdAt: "desc" },
-  });
-  const since = lastLog ? subHours(lastLog.createdAt, 1) : undefined;
-  timing.since = since?.getTime() ?? 0;
+  }));
 
-  // Mapa laundryId → data da última venda no DB (para detectar unidades com dados obsoletos)
-  const lastSaleRows = since
+  // Cada unidade retoma da sua própria última venda gravada. Antes havia uma marca única para a
+  // rede (o último sucesso de qualquer unidade): quando uma execução era cortada no meio, as
+  // unidades que ficavam de fora perdiam o intervalo, porque a seguinte só buscava dali em diante.
+  const lastSaleRows = hasSyncedBefore
     ? await db.sale.groupBy({ by: ["laundryId"], _max: { date: true } })
     : [];
-  const lastSaleByLaundry = new Map(lastSaleRows.map((r) => [r.laundryId, r._max.date]));
-
-  const laundriesWithSales = since
-    ? new Set(lastSaleByLaundry.keys())
-    : new Set<string>();
-
-  // Sem threshold de stale: cron é sempre incremental para unidades já conhecidas.
-  // Full resync só ocorre para unidades sem nenhuma venda no banco (novas).
-  const staleThreshold = undefined;
+  const lastSaleByLaundry = new Map<string, Date>();
+  for (const r of lastSaleRows) if (r._max.date) lastSaleByLaundry.set(r.laundryId, r._max.date);
+  const laundriesWithSales = new Set(lastSaleByLaundry.keys());
 
   const t2 = Date.now();
   const salesBefore  = await db.sale.count();
   const cyclesBefore = await db.cycle.count();
 
-  // Full sync (sem histórico ou dados obsoletos): processa 1 por vez para não bater rate limit 429
-  // Incremental: paralelo é seguro (poucas páginas por laundry)
+  // Carga completa (unidade sem nenhuma venda no banco): uma por vez para não bater rate limit 429.
+  // Incremental: paralelo é seguro (poucas páginas por unidade).
   const fullSyncLaundries = laundries.filter((l) => !laundriesWithSales.has(l.id));
-  const fullSyncIds       = new Set(fullSyncLaundries.map((l) => l.id));
-  const incrSyncLaundries = laundries.filter((l) => !fullSyncIds.has(l.id));
+
+  // O incremental começa pelas unidades mais atrasadas: se a execução for cortada, quem ficou de
+  // fora entra na frente na próxima. Unidades sem venda há mais de 30 dias vão para o fim, porque
+  // quase nunca têm novidade.
+  const lastSaleMs = (id: string) => lastSaleByLaundry.get(id)!.getTime();
+  const inactiveBefore = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const isInactive = (id: string) => lastSaleMs(id) < inactiveBefore;
+  const incrSyncLaundries = laundries
+    .filter((l) => laundriesWithSales.has(l.id))
+    .sort(
+      (a, b) =>
+        Number(isInactive(a.id)) - Number(isInactive(b.id)) || lastSaleMs(a.id) - lastSaleMs(b.id),
+    );
 
   await batch(fullSyncLaundries, 1, async (l) => {
     const err = await syncSalesWebApp(l.id, l.organizationId, laundriesWithSales, undefined);
     if (err) errors.push(`${l.name}: ${err}`);
   });
   await batch(incrSyncLaundries, LAUNDRY_BATCH, async (l) => {
+    const since = subHours(lastSaleByLaundry.get(l.id)!, 1);
     const err = await syncSalesWebApp(l.id, l.organizationId, laundriesWithSales, since);
     if (err) errors.push(`${l.name}: ${err}`);
   });
@@ -351,7 +358,11 @@ export async function syncSalesWebApp(
     const effectiveSince = laundriesWithSales.has(laundryId) ? since : undefined;
     const allData = await fetchSalesFromWebApp(laundryId, orgId, effectiveSince);
 
-    const validData = allData.filter((s) => s.customer?.id);
+    // Da venda mais antiga para a mais nova: se a execução for interrompida no meio, o que já foi
+    // gravado é contíguo, e a próxima retoma da última venda gravada sem deixar buraco.
+    const validData = allData
+      .filter((s) => s.customer?.id)
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
 
     // Clientes
     await batch(validData, UPSERT_BATCH, async (s) => {
