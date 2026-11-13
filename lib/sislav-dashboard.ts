@@ -210,6 +210,26 @@ export function dashboardToday(timezoneHours: number): string {
   return new Date(Date.now() + timezoneHours * HOUR_MS).toISOString().slice(0, 10);
 }
 
+/** Lê no SisLav e resume os dias de `fromDay` a `toDay` (datas do Dashboard, inclusive) de uma unidade. */
+export async function loadDashboardDays(
+  laundryId: string,
+  orgId: string,
+  fromDay: string,
+  toDay: string,
+  timezoneHours: number,
+): Promise<Array<{ day: string } & DashboardDayTotals>> {
+  // Um dia de folga de cada lado: lançamentos manuais são gravados com a data sem fuso e podem
+  // cair fora do intervalo exato em horário local. O que sobrar é descartado no filtro abaixo,
+  // junto com os registros de hoje, que o endpoint devolve sempre.
+  const from = new Date(dayToDate(addDays(fromDay, -1)).getTime() - timezoneHours * HOUR_MS);
+  const to = new Date(dayToDate(addDays(toDay, 2)).getTime() - timezoneHours * HOUR_MS - 1);
+
+  const records = await fetchDashboardRecords(laundryId, orgId, from, to);
+  return [...summarizeByDay(records, timezoneHours)]
+    .filter(([day]) => day >= fromDay && day <= toDay)
+    .map(([day, totals]) => ({ day, ...totals }));
+}
+
 /**
  * Recalcula os dias de `fromDay` a `toDay` (datas do Dashboard, inclusive) de uma unidade e
  * substitui o que havia no banco. Substituir o intervalo inteiro, em vez de somar o que chegou,
@@ -223,16 +243,8 @@ export async function syncDashboardDays(
   toDay: string,
   timezoneHours: number,
 ): Promise<number> {
-  // Um dia de folga de cada lado: lançamentos manuais são gravados com a data sem fuso e podem
-  // cair fora do intervalo exato em horário local. O que sobrar é descartado no filtro abaixo,
-  // junto com os registros de hoje, que o endpoint devolve sempre.
-  const from = new Date(dayToDate(addDays(fromDay, -1)).getTime() - timezoneHours * HOUR_MS);
-  const to = new Date(dayToDate(addDays(toDay, 2)).getTime() - timezoneHours * HOUR_MS - 1);
-
-  const records = await fetchDashboardRecords(laundryId, orgId, from, to);
-  const rows = [...summarizeByDay(records, timezoneHours)]
-    .filter(([day]) => day >= fromDay && day <= toDay)
-    .map(([day, totals]) => ({ laundryId, day: dayToDate(day), ...totals }));
+  const days = await loadDashboardDays(laundryId, orgId, fromDay, toDay, timezoneHours);
+  const rows = days.map(({ day, ...totals }) => ({ laundryId, day: dayToDate(day), ...totals }));
 
   await db.$transaction([
     db.dashboardDay.deleteMany({
