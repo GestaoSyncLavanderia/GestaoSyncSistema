@@ -134,6 +134,7 @@ export async function fetchSalesFromWebApp(
   laundryId: string,
   orgId: string,
   since?: Date,
+  until?: Date,
 ): Promise<WebAppSale[]> {
   if (!process.env.SISLAV_WEB_EMAIL || !process.env.SISLAV_WEB_PASSWORD) {
     throw new Error("SISLAV_WEB_EMAIL e SISLAV_WEB_PASSWORD não configurados");
@@ -150,7 +151,8 @@ export async function fetchSalesFromWebApp(
     ? brazilDateStr(new Date(since.getTime() - 24 * 60 * 60 * 1000))
     : brazilDateStr(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
   // Amanhã em Brasília para capturar vendas do dia ainda em andamento
-  const end = brazilDateStr(new Date(Date.now() + 24 * 60 * 60 * 1000));
+  // (ou o dia de `until`, quando informado)
+  const end = brazilDateStr(until ?? new Date(Date.now() + 24 * 60 * 60 * 1000));
 
   while (true) {
     const qs =

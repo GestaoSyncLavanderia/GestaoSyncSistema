@@ -1,0 +1,55 @@
+name: Batimento diario
+
+# Todo dia às 07:00 de Brasília confere o dia anterior do painel contra o SisLav, unidade por
+# unidade (faturamento e vendas). Se algo divergir, o workflow falha e o GitHub avisa por e-mail;
+# a lista das diferenças fica no log desta execução.
+#
+# Usa os mesmos segredos do sync (SYNC_URL e CRON_SECRET).
+
+on:
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+    inputs:
+      day:
+        description: "Dia a conferir (AAAA-MM-DD). Vazio = ontem."
+        required: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Conferir com o SisLav
+        env:
+          SYNC_URL: ${{ secrets.SYNC_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          DAY: ${{ github.event.inputs.day }}
+        run: |
+          if [ -z "$SYNC_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::Configure os segredos SYNC_URL e CRON_SECRET no repositório."
+            exit 1
+          fi
+          url="${SYNC_URL%/sync}/reconcile"
+          if [ -n "$DAY" ]; then url="$url?day=$DAY"; fi
+
+          status=$(curl -sS -o resposta.json -w '%{http_code}' --max-time 330 \
+            -H "Authorization: Bearer $CRON_SECRET" "$url") || {
+            echo "::error::Não foi possível chamar o batimento."
+            exit 1
+          }
+          if [ "$status" != "200" ]; then
+            echo "::error::O batimento respondeu HTTP $status."
+            exit 1
+          fi
+
+          # Só nomes de unidade e totais do dia: nada de dados de clientes.
+          dia=$(jq -r '.day' resposta.json)
+          echo "Dia conferido: $dia ($(jq -r '.laundries' resposta.json) unidades)"
+          jq -r '.differences[]' resposta.json | sed 's/^/Diferença: /'
+          jq -r '.errors[]' resposta.json | sed 's/^/Erro: /'
+          if [ "$(jq -r '.ok' resposta.json)" != "true" ]; then
+            echo "::error::O painel diverge do SisLav em $dia. Veja a lista acima."
+            exit 1
+          fi
+          echo "Tudo igual ao SisLav."
