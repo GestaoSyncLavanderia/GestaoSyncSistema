@@ -1,0 +1,64 @@
+name: Sync
+
+# Dispara a sincronização com o Sislav a cada 30 minutos.
+#
+# Precisa de dois segredos no repositório (Settings → Secrets and variables → Actions):
+#   SYNC_URL     endereço completo da rota: https://<domínio do painel>/api/cron/sync
+#   CRON_SECRET  o mesmo valor da variável CRON_SECRET configurada na Vercel
+#
+# O horário do cron é UTC e o GitHub pode atrasar alguns minutos em horários de pico.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+# Uma execução por vez: se a anterior ainda não terminou, a próxima espera.
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Chamar o sync
+        env:
+          SYNC_URL: ${{ secrets.SYNC_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$SYNC_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::Configure os segredos SYNC_URL e CRON_SECRET no repositório."
+            exit 1
+          fi
+
+          # O corpo da resposta fica só no arquivo: o repositório é público e os logs também.
+          status=$(curl -sS -o resposta.json -w '%{http_code}' --max-time 330 \
+            -H "Authorization: Bearer $CRON_SECRET" "$SYNC_URL") || {
+            echo "::error::Não foi possível chamar o sync (falha de rede ou tempo esgotado)."
+            exit 1
+          }
+
+          case "$status" in
+            200)
+              erros=$(jq -r '.errors | length' resposta.json)
+              echo "Sync concluído: $(jq -r '.newSales' resposta.json) vendas novas, $erros erro(s)."
+              # Um erro isolado se resolve na próxima execução; muitos de uma vez indicam problema geral
+              # (login no Sislav quebrado, por exemplo).
+              if [ "$erros" -gt 5 ]; then
+                echo "::error::O sync terminou com erro em várias unidades."
+                exit 1
+              elif [ "$erros" -gt 0 ]; then
+                echo "::warning::O sync terminou com erro em alguma unidade."
+              fi
+              ;;
+            504)
+              # A Vercel corta a função aos 300s. As unidades que faltaram entram na frente na próxima.
+              echo "::warning::O sync passou do limite de tempo da Vercel."
+              ;;
+            *)
+              echo "::error::O sync respondeu HTTP $status."
+              exit 1
+              ;;
+          esac

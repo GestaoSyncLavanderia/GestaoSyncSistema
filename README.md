@@ -43,6 +43,21 @@ O sistema importa dados via API Sislav de forma incremental. Rotas disponíveis:
 
 > **Limite Vercel Hobby:** todas as rotas de sync têm `maxDuration = 300s`.
 
+### Sincronização automática
+
+O workflow `.github/workflows/sync.yml` (GitHub Actions) chama `GET /api/cron/sync` a cada 30 minutos. A rota não passa pelo login: ela exige o cabeçalho `Authorization: Bearer <CRON_SECRET>` e fica fechada se `CRON_SECRET` não estiver configurado.
+
+Para funcionar, o repositório precisa de dois segredos (Settings → Secrets and variables → Actions):
+
+| Segredo | Valor |
+|---|---|
+| `SYNC_URL` | Endereço completo da rota: `https://<domínio do painel>/api/cron/sync` |
+| `CRON_SECRET` | O mesmo valor da variável `CRON_SECRET` na Vercel |
+
+O workflow falha (e o GitHub avisa por e-mail) quando o sync não responde, responde com erro ou termina com erro em várias unidades. Passar do limite de tempo da Vercel gera só um aviso: as unidades que faltaram entram na frente na execução seguinte. Também dá para disparar à mão pela aba Actions (**Run workflow**).
+
+> O GitHub desativa workflows agendados de repositórios públicos depois de 60 dias sem atividade no repositório. Se o sync parar, confira a aba Actions.
+
 ## Faturamento: mesma fonte da aba Dashboard do Sislav
 
 A tela de **Faturamento** lê a tabela `DashboardDay`: um resumo por unidade e por dia, calculado a partir dos mesmos dados e com a mesma fórmula da aba Dashboard do Sislav (`lib/sislav-dashboard.ts`). Não há regra de cálculo por unidade.
@@ -90,6 +105,10 @@ Para alterar: atualizar o campo `revenueMetric` diretamente no banco via Prisma.
 DATABASE_URL=          # Connection string PostgreSQL (Supabase)
 SISLAV_API_URL=        # Base URL da API Sislav (ex: https://api.sislav.com.br)
 SISLAV_API_KEY=        # Chave de API Sislav
+SISLAV_WEB_EMAIL=      # Login da conta do painel web do Sislav (fonte principal do sync)
+SISLAV_WEB_PASSWORD=   # Senha dessa conta
+CRON_SECRET=           # Chave exigida por /api/cron/sync (a mesma do segredo no GitHub)
+AUTH_SECRET=           # Segredo de sessão do NextAuth
 SYSTEM_LOCKED=         # "true" bloqueia o sistema (tela de indisponibilidade em /bloqueado). Qualquer outro valor/ausente = liberado.
 ```
 
