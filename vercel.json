@@ -1,4 +1,5 @@
 {
+  "regions": ["gru1"],
   "functions": {
     "app/api/cron/sync/route.ts": {
       "maxDuration": 300

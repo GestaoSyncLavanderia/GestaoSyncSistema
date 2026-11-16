@@ -285,7 +285,16 @@ export async function syncDashboard(): Promise<string[]> {
 
     const toDay = dashboardToday(timezoneHours);
     const fromDay = addDays(toDay, -((wide ? WIDE_DAYS : RECENT_DAYS) - 1));
-    const laundries = await db.laundry.findMany({ select: { id: true, organizationId: true, name: true } });
+    const allLaundries = await db.laundry.findMany({ select: { id: true, organizationId: true, name: true } });
+
+    // Unidade fechada (já tem histórico, mas nenhuma receita nos últimos 60 dias) só é relida na
+    // releitura diária: o SisLav costuma demorar para responder por elas e não há o que atualizar.
+    const recentCutoff = dayToDate(addDays(toDay, -60));
+    const lastRevenue = await db.dashboardDay.groupBy({ by: ["laundryId"], _max: { day: true } });
+    const closed = new Set(
+      lastRevenue.filter((r) => r._max.day && r._max.day < recentCutoff).map((r) => r.laundryId),
+    );
+    const laundries = wide ? allLaundries : allLaundries.filter((l) => !closed.has(l.id));
 
     for (let i = 0; i < laundries.length; i += PARALLEL_LAUNDRIES) {
       await Promise.all(
