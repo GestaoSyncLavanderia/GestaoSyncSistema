@@ -22,6 +22,7 @@ function brazilToday() {
 const PAGE_TABS: { href: string; label: string }[] = [
   { href: "/dashboard/faturamento", label: "Faturamento" },
   { href: "/dashboard/movimento",   label: "Movimento" },
+  { href: "/dashboard/batimento",   label: "Batimento" },
 ];
 
 function DashboardHeader() {

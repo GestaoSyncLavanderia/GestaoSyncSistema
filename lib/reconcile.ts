@@ -91,7 +91,10 @@ export async function reconcileDay(day?: string): Promise<ReconcileResult> {
       data: {
         entity: "reconcile",
         status: ok ? "success" : "error",
-        message: ok ? `${target}: ${checked.length} unidades ok` : [...differences, ...errors].join(" | ").slice(0, 2000),
+        // Formato lido pela página /dashboard/batimento: "<dia>: <resumo>" ou "<dia>: <item> | <item> ...".
+        message: ok
+          ? `${target}: ${checked.length} unidades ok`
+          : `${target}: ${[...differences, ...errors].join(" | ")}`.slice(0, 4000),
       },
     })
     .catch(() => {});
