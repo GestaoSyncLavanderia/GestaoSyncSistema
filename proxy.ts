@@ -12,9 +12,11 @@ export default auth((req) => {
   const isDashboard  = pathname.startsWith("/dashboard");
   const isAuthApi    = pathname.startsWith("/api/auth");
   const isSyncApi    = pathname.startsWith("/api/sync") || pathname.startsWith("/api/debug");
+  // O agendador chama /api/cron sem sessão de usuário; a própria rota exige a chave CRON_SECRET.
+  const isCronApi    = pathname.startsWith("/api/cron");
   const isApi        = pathname.startsWith("/api");
 
-  if (isApi && !isAuthApi && !isSyncApi) {
+  if (isApi && !isAuthApi && !isSyncApi && !isCronApi) {
     if (!isLoggedIn) {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }

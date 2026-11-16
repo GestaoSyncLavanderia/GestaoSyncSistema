@@ -4,9 +4,11 @@ import { syncAll } from "@/lib/sync";
 
 export const maxDuration = 300;
 
+// Chamada pelo agendador (.github/workflows/sync.yml) a cada 30 minutos.
 export async function GET(req: Request) {
-  const auth = req.headers.get("authorization");
-  if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  // Esta rota não passa pelo login, então sem CRON_SECRET configurado ela fica fechada.
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
