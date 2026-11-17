@@ -4,7 +4,8 @@ import { syncAll } from "@/lib/sync";
 
 export const maxDuration = 300;
 
-// Chamada pelo agendador (.github/workflows/sync.yml) a cada 30 minutos.
+// Chamada a cada 30 minutos pelo pg_cron do Supabase (job "painel-sync") e, sob demanda, pelo
+// workflow .github/workflows/sync.yml.
 export async function GET(req: Request) {
   // Esta rota não passa pelo login, então sem CRON_SECRET configurado ela fica fechada.
   const secret = process.env.CRON_SECRET;

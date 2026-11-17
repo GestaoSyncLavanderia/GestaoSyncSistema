@@ -45,18 +45,18 @@ O sistema importa dados via API Sislav de forma incremental. Rotas disponíveis:
 
 ### Sincronização automática
 
-O workflow `.github/workflows/sync.yml` (GitHub Actions) chama `GET /api/cron/sync` a cada 30 minutos. A rota não passa pelo login: ela exige o cabeçalho `Authorization: Bearer <CRON_SECRET>` e fica fechada se `CRON_SECRET` não estiver configurado.
+O sync roda a cada 30 minutos, em ponto (:00 e :30), pelo **pg_cron do Supabase**: o job `painel-sync` chama `GET /api/cron/sync`, e o job `painel-batimento` chama `GET /api/cron/reconcile` todo dia às 07:00 (Brasília). Os dois ficam em Integrations → Cron no painel do Supabase, e a chave vai guardada no Vault (`cron_secret`). Histórico: tabelas `cron.job_run_details` e `net._http_response`.
 
-Para funcionar, o repositório precisa de dois segredos (Settings → Secrets and variables → Actions):
+As rotas `/api/cron/*` não passam pelo login: exigem o cabeçalho `Authorization: Bearer <CRON_SECRET>` e ficam fechadas se `CRON_SECRET` não estiver configurado.
 
-| Segredo | Valor |
-|---|---|
-| `SYNC_URL` | Endereço completo da rota: `https://<domínio do painel>/api/cron/sync` |
-| `CRON_SECRET` | O mesmo valor da variável `CRON_SECRET` na Vercel |
+Os workflows do GitHub Actions são complementares, porque o agendamento do GitHub atrasa horas e não é confiável para horário:
 
-O workflow falha (e o GitHub avisa por e-mail) quando o sync não responde, responde com erro ou termina com erro em várias unidades. Passar do limite de tempo da Vercel gera só um aviso: as unidades que faltaram entram na frente na execução seguinte. Também dá para disparar à mão pela aba Actions (**Run workflow**).
+- **Sync** (`.github/workflows/sync.yml`): só sob demanda, pela aba Actions (**Run workflow**).
+- **Batimento diario** (`.github/workflows/reconcile.yml`): agendado às 07:00, mas pode rodar com atraso. Falha, e o GitHub avisa por e-mail, quando o painel diverge do Sislav.
 
-> O GitHub desativa workflows agendados de repositórios públicos depois de 60 dias sem atividade no repositório. Se o sync parar, confira a aba Actions.
+Ambos usam dois segredos do repositório (Settings → Secrets and variables → Actions): `SYNC_URL` (`https://<domínio do painel>/api/cron/sync`) e `CRON_SECRET` (o mesmo valor da Vercel).
+
+Passar do limite de tempo da Vercel (300 s) não perde dado: as unidades que faltaram entram na frente na execução seguinte.
 
 ## Faturamento: mesma fonte da aba Dashboard do Sislav
 

@@ -287,14 +287,23 @@ export async function syncDashboard(): Promise<string[]> {
     const fromDay = addDays(toDay, -((wide ? WIDE_DAYS : RECENT_DAYS) - 1));
     const allLaundries = await db.laundry.findMany({ select: { id: true, organizationId: true, name: true } });
 
-    // Unidade fechada (já tem histórico, mas nenhuma receita nos últimos 60 dias) só é relida na
-    // releitura diária: o SisLav costuma demorar para responder por elas e não há o que atualizar.
+    // Unidade fechada (já tem histórico, mas nenhuma receita nos últimos 60 dias e nenhuma venda
+    // na última semana) não é relida: o SisLav demora a responder por elas, estoura o tempo
+    // limite todo dia e não há o que atualizar. Se uma delas voltar a vender, a venda entra pelo
+    // sync de vendas e, na execução seguinte, ela deixa de contar como fechada.
     const recentCutoff = dayToDate(addDays(toDay, -60));
     const lastRevenue = await db.dashboardDay.groupBy({ by: ["laundryId"], _max: { day: true } });
+    const recentSales = await db.sale.groupBy({
+      by: ["laundryId"],
+      where: { date: { gte: new Date(Date.now() - 7 * 24 * HOUR_MS) } },
+    });
+    const sellingNow = new Set(recentSales.map((r) => r.laundryId));
     const closed = new Set(
-      lastRevenue.filter((r) => r._max.day && r._max.day < recentCutoff).map((r) => r.laundryId),
+      lastRevenue
+        .filter((r) => r._max.day && r._max.day < recentCutoff && !sellingNow.has(r.laundryId))
+        .map((r) => r.laundryId),
     );
-    const laundries = wide ? allLaundries : allLaundries.filter((l) => !closed.has(l.id));
+    const laundries = allLaundries.filter((l) => !closed.has(l.id));
 
     for (let i = 0; i < laundries.length; i += PARALLEL_LAUNDRIES) {
       await Promise.all(
