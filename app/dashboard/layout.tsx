@@ -21,7 +21,8 @@ function brazilToday() {
 
 const PAGE_TABS: { href: string; label: string }[] = [
   { href: "/dashboard/faturamento", label: "Faturamento" },
-  { href: "/dashboard/movimento",   label: "Movimento" },
+  // Movimento fica fora do menu até ser conferido contra a aba Vendas do SisLav.
+  // A página (/dashboard/movimento) e a rota continuam no código.
   { href: "/dashboard/batimento",   label: "Batimento" },
 ];
 
